@@ -88,14 +88,14 @@ export async function getWaitingIssues() {
   const octokit = getOctokit();
   const repo = getRepo();
 
-  const issues = await octokit.rest.issues.listForRepo({
+  const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
     ...repo,
     state: 'open',
     labels: LABELS.waiting,
     per_page: 100
   });
 
-  return issues.data;
+  return issues;
 }
 
 // Winning result for an issue
@@ -162,7 +162,7 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
       });
 
       // Update issue with results
-      await updateIssueWithResults(issue.number, ranks);
+      await updateIssueWithResults(issue.number, round, ranks);
 
       // Track winning results for notifications
       const hasWinning = ranks.some(r => r > 0);
@@ -181,13 +181,13 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
 }
 
 // Update issue with winning results
-async function updateIssueWithResults(issueNumber: number, ranks: number[]): Promise<void> {
+async function updateIssueWithResults(issueNumber: number, round: number, ranks: number[]): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
   const context = getContext();
 
   // Convert ranks to labels
-  const labels = ranks.map(rankToLabel);
+  const labels = Array.from(new Set(ranks.map(rankToLabel)));
 
   // Check if all games lost
   const allLost = ranks.every(r => r === 0);
@@ -206,7 +206,7 @@ async function updateIssueWithResults(issueNumber: number, ranks: number[]): Pro
     await octokit.rest.issues.createComment({
       ...repo,
       issue_number: issueNumber,
-      body: `@${context.repo.owner} ${winningGames}게임에 당첨됐습니다!`
+      body: buildWinningComment(context.repo.owner, round, ranks, winningGames)
     });
 
     // Remove losing labels and keep only winning ones
@@ -217,6 +217,15 @@ async function updateIssueWithResults(issueNumber: number, ranks: number[]): Pro
       labels: winningLabels
     });
   }
+}
+
+function buildWinningComment(owner: string, round: number, ranks: number[], winningGames: number): string {
+  const lines = ranks.map((rank, index) => {
+    const result = rank > 0 ? `${rank}등` : '낙첨';
+    return `- ${index + 1}번 게임: ${result}`;
+  });
+
+  return [`@${owner} 제${round}회 ${winningGames}게임에 당첨됐습니다!`, '', ...lines].join('\n');
 }
 
 // Helper: Convert rank to label

@@ -21,8 +21,25 @@ interface WorkflowApi {
 
 type CustomWorkflow = (api: WorkflowApi) => Promise<unknown> | unknown;
 
+function resolveWorkflowPath(workflowFile: string): string {
+  const repoRoot = process.cwd();
+  const resolvedPath = path.resolve(repoRoot, workflowFile);
+  const relativePath = path.relative(repoRoot, resolvedPath);
+  const allowedExtensions = new Set(['.js', '.mjs', '.cjs']);
+
+  if (path.isAbsolute(workflowFile) || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error(`[Main] workflow-file must point to a file inside this repository: "${workflowFile}"`);
+  }
+
+  if (!allowedExtensions.has(path.extname(resolvedPath))) {
+    throw new Error(`[Main] workflow-file must be a JavaScript module (.js, .mjs, or .cjs): "${workflowFile}"`);
+  }
+
+  return resolvedPath;
+}
+
 async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
-  const resolvedPath = path.resolve(process.cwd(), workflowFile);
+  const resolvedPath = resolveWorkflowPath(workflowFile);
 
   try {
     const workflowModule = await import(pathToFileURL(resolvedPath).href);
@@ -61,7 +78,7 @@ async function run() {
     // Get inputs
     const id = core.getInput('dhlottery-id', { required: true });
     const pwd = core.getInput('dhlottery-password', { required: true });
-    const amount = parseInt(core.getInput('game-count') || '5');
+    const amount = Number(core.getInput('game-count') || '5');
     const workflowFile = core.getInput('workflow-file');
 
     console.log('[Main] Starting lotto purchase action');

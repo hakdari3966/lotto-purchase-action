@@ -115,6 +115,7 @@ export default async ({ purchaseAuto, purchaseManual }) => {
 
 ## 🔗 링크
 
+- 관리자 대시보드: [`dashboard/index.html`](./dashboard/index.html)
 - 커스텀 워크플로우 가이드: [custom-workflows/README.md](./custom-workflows/README.md)
 - 기여 가이드: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - 보안 정책: [SECURITY.md](./SECURITY.md)

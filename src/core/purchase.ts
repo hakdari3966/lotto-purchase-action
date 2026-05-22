@@ -100,8 +100,9 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
     throw new Error('Not authenticated. Login first');
   }
 
-  // Validate amount
-  amount = Math.max(1, Math.min(5, amount));
+  if (!Number.isInteger(amount) || amount < 1 || amount > 5) {
+    throw new Error('자동 구매 게임 수는 1~5 사이의 정수여야 합니다');
+  }
 
   // Validate purchase time
   validatePurchaseAvailability();
@@ -133,6 +134,10 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
 
   if (result.length === 0 || result.some(nums => nums.length === 0)) {
     throw new Error('Failed to parse purchase results');
+  }
+
+  if (result.length !== amount) {
+    throw new Error(`구매 결과 게임 수가 요청과 다릅니다 (requested: ${amount}, purchased: ${result.length})`);
   }
 
   console.log('[Purchase] Auto purchase completed:', result);
