@@ -3,9 +3,10 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { BrowserSession } from './core/browser';
 import { purchaseAuto, purchaseManual } from './core/purchase';
+import { isInsufficientBalanceError } from './core/errors';
 import { generateExcluding } from './utils/numbers';
-import { initLabels, createConsolidatedIssue, checkWinningIssues } from './github/issues';
-import { notifyPurchase, notifyWinning } from './telegram/notify';
+import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, checkWinningIssues } from './github/issues';
+import { notifyPurchase, notifyPurchaseFailure, notifyWinning } from './telegram/notify';
 
 interface PurchaseMetadata {
   type: 'auto' | 'manual';
@@ -136,6 +137,20 @@ async function run() {
     if (error instanceof Error) {
       console.error('[Main] Workflow error:', error.message);
       core.setFailed(error.message);
+
+      if (isInsufficientBalanceError(error)) {
+        try {
+          await createPurchaseFailureIssue(error.details, error.message);
+        } catch (issueError) {
+          console.error('[Main] Failed to create purchase failure issue:', issueError);
+        }
+
+        try {
+          await notifyPurchaseFailure(error.details, error.message);
+        } catch (telegramError) {
+          console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
+        }
+      }
     } else {
       console.error('[Main] Workflow error:', error);
       core.setFailed(String(error));

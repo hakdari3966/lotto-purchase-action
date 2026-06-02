@@ -4,9 +4,12 @@ import timezone from 'dayjs/plugin/timezone';
 import type { Page } from 'playwright';
 import type { BrowserSession } from './browser';
 import { GOTO_TIMEOUT, PURCHASE_PAGE_READY_TIMEOUT, PURCHASE_RESULT_TIMEOUT, URLS, SELECTORS } from './config';
+import { InsufficientBalanceError, formatWon } from './errors';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+const LOTTO_GAME_PRICE = 1000;
 
 // Validate purchase availability (time-based)
 function validatePurchaseAvailability(): void {
@@ -57,6 +60,122 @@ async function getPurchaseDiagnostics(page: Page): Promise<string> {
   return [`URL: ${page.url()}`, `title: ${title}`, `bodySnippet: ${bodySnippet || 'none'}`].join(', ');
 }
 
+function parseWon(value: string): number | null {
+  const normalized = value.replace(/[^\d]/g, '');
+  if (!normalized) {
+    return null;
+  }
+
+  return Number(normalized);
+}
+
+function parseDepositBalance(text: string): number | null {
+  const normalized = text.replace(/\s+/g, ' ');
+  const patterns = [
+    /예치금\s*잔액\s*[:：]?\s*([\d,]+)\s*원/,
+    /보유\s*예치금\s*[:：]?\s*([\d,]+)\s*원/,
+    /예치금\s*[:：]?\s*([\d,]+)\s*원/,
+    /잔액\s*[:：]?\s*([\d,]+)\s*원/
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const parsed = match?.[1] ? parseWon(match[1]) : null;
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+async function readDepositBalance(page: Page): Promise<number | null> {
+  const depositAmountText = await page
+    .locator('.myPage-deposit-info.grid-item02 .deposit-box01 #totalAmt')
+    .first()
+    .innerText({ timeout: 5000 })
+    .catch(() => '');
+  const depositAmount = parseWon(depositAmountText);
+  if (depositAmount !== null) {
+    return depositAmount;
+  }
+
+  const depositBoxText = await page
+    .locator('.myPage-deposit-info.grid-item02 .deposit-box01')
+    .first()
+    .innerText({ timeout: 2000 })
+    .catch(() => '');
+  const depositBoxAmount = parseDepositBalance(depositBoxText);
+  if (depositBoxAmount !== null) {
+    return depositBoxAmount;
+  }
+
+  const candidateSelectors = [
+    '[id*="deposit" i]',
+    '[class*="deposit" i]',
+    '[id*="balance" i]',
+    '[class*="balance" i]',
+    '[id*="money" i]',
+    '[class*="money" i]'
+  ];
+
+  for (const selector of candidateSelectors) {
+    const text = await page
+      .locator(selector)
+      .first()
+      .innerText({ timeout: 1000 })
+      .catch(() => '');
+    const parsed = parseDepositBalance(text);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  const bodyText = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '');
+
+  return parseDepositBalance(bodyText);
+}
+
+async function getDepositBalance(session: BrowserSession): Promise<number> {
+  const page = session.getPage();
+
+  console.log('[Purchase] Checking deposit balance');
+  await session.navigate(URLS.MYPAGE_HOME);
+  await page.waitForLoadState('domcontentloaded').catch(() => undefined);
+
+  if (page.url().includes('/login')) {
+    throw new Error('예치금 확인 실패: 마이페이지 접근 중 로그인 페이지로 이동했습니다');
+  }
+
+  const balance = await readDepositBalance(page);
+  if (balance === null || Number.isNaN(balance)) {
+    throw new Error(
+      `예치금 확인 실패: 마이페이지에서 예치금 잔액을 찾지 못했습니다 (${await getPurchaseDiagnostics(page)})`
+    );
+  }
+
+  console.log(`[Purchase] Current deposit balance: ${formatWon(balance)}`);
+  return balance;
+}
+
+async function validateDepositBalance(session: BrowserSession, requestedGames: number): Promise<void> {
+  const requiredAmount = requestedGames * LOTTO_GAME_PRICE;
+  const currentBalance = await getDepositBalance(session);
+
+  if (currentBalance < requiredAmount) {
+    throw new InsufficientBalanceError({
+      currentBalance,
+      requiredAmount,
+      requestedGames
+    });
+  }
+
+  console.log(`[Purchase] Deposit balance is enough: required ${formatWon(requiredAmount)}`);
+}
+
 async function openPurchasePage(session: BrowserSession, mode: 'auto' | 'manual'): Promise<Page> {
   const page = session.getPage();
   const readySelector = mode === 'manual' ? SELECTORS.NUMBER_CHECKBOX(1) : SELECTORS.PURCHASE_TYPE_RANDOM_BTN;
@@ -105,6 +224,7 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
 
   // Validate purchase time
   validatePurchaseAvailability();
+  await validateDepositBalance(session, amount);
 
   const page = await openPurchasePage(session, 'auto');
 
@@ -166,6 +286,7 @@ export async function purchaseManual(session: BrowserSession, numbers: number[][
 
   // Validate purchase time
   validatePurchaseAvailability();
+  await validateDepositBalance(session, numbers.length);
 
   const page = await openPurchasePage(session, 'manual');
 

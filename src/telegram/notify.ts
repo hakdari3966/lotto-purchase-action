@@ -1,6 +1,7 @@
 import { isEnabled, sendMessage } from './client';
 import { getCheckWinningLink } from '../utils/winning';
 import { getNextLottoRound } from '../utils/rounds';
+import { formatWon, type InsufficientBalanceDetails } from '../core/errors';
 
 interface PurchaseMetadata {
   type: 'auto' | 'manual';
@@ -44,4 +45,20 @@ export async function notifyWinning(issueNumber: number, round: number, ranks: n
 
   console.log('[Telegram] Sending winning notification');
   await sendMessage(message);
+}
+
+// Send purchase failure notification to Telegram
+export async function notifyPurchaseFailure(details: InsufficientBalanceDetails, message: string): Promise<void> {
+  if (!isEnabled()) return;
+
+  const notification =
+    `⚠️ *로또 구매 실패*\n\n` +
+    `${message}\n\n` +
+    `요청 게임 수: ${details.requestedGames}게임\n` +
+    `현재 예치금: ${formatWon(details.currentBalance)}\n` +
+    `필요 금액: ${formatWon(details.requiredAmount)}\n` +
+    `부족 금액: ${formatWon(details.shortage)}`;
+
+  console.log('[Telegram] Sending purchase failure notification');
+  await sendMessage(notification);
 }

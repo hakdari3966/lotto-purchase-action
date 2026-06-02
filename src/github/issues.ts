@@ -1,6 +1,7 @@
 import { getOctokit, getRepo, getContext } from './client';
 import { fetchWinningNumbers, checkWinning, getCheckWinningLink } from '../utils/winning';
 import { getLastLottoRound, getNextLottoRound } from '../utils/rounds';
+import { formatWon, type InsufficientBalanceDetails } from '../core/errors';
 
 // Labels for GitHub Issues
 const LABELS = {
@@ -10,7 +11,8 @@ const LABELS = {
   winning_2nd: ':confetti_ball: :2nd_place_medal:',
   winning_3rd: ':confetti_ball: :3rd_place_medal:',
   winning_4th: ':tada: :four:',
-  winning_5th: ':tada: :five:'
+  winning_5th: ':tada: :five:',
+  purchase_failure: ':warning: purchase-failure'
 };
 
 // Initialize labels
@@ -81,6 +83,24 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
   console.log(
     `Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`
   );
+}
+
+// Create a GitHub Issue for a purchase failure that needs user action
+export async function createPurchaseFailureIssue(details: InsufficientBalanceDetails, message: string): Promise<void> {
+  const octokit = getOctokit();
+  const repo = getRepo();
+  const workflowRun = getContext().runId
+    ? `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${getContext().runId}`
+    : '';
+
+  await octokit.rest.issues.create({
+    ...repo,
+    title: `로또 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`,
+    body: buildPurchaseFailureIssueBody(details, message, workflowRun),
+    labels: [LABELS.purchase_failure]
+  });
+
+  console.log('[Issues] Created purchase failure issue for insufficient balance');
 }
 
 // Get all waiting issues (bug fix: get ALL open issues with waiting label)
@@ -342,4 +362,28 @@ function buildConsolidatedIssueBody(purchases: PurchaseMetadata[], round: number
   });
 
   return header + sections.join('\n');
+}
+
+function buildPurchaseFailureIssueBody(
+  details: InsufficientBalanceDetails,
+  message: string,
+  workflowRun: string
+): string {
+  return (
+    `status: failed\n` +
+    `reason: insufficient_balance\n` +
+    `timestamp: ${new Date().toISOString()}\n` +
+    `requested_games: ${details.requestedGames}\n` +
+    `current_balance: ${details.currentBalance}\n` +
+    `required_amount: ${details.requiredAmount}\n` +
+    `shortage: ${details.shortage}\n` +
+    (workflowRun ? `workflow_run: ${workflowRun}\n` : '') +
+    `\n` +
+    `## 구매 실패 사유\n` +
+    `${message}\n\n` +
+    `## 금액\n` +
+    `- 현재 예치금: ${formatWon(details.currentBalance)}\n` +
+    `- 필요 금액: ${formatWon(details.requiredAmount)}\n` +
+    `- 부족 금액: ${formatWon(details.shortage)}\n`
+  );
 }

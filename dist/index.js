@@ -30828,6 +30828,7 @@ const URLS = {
     MAIN: 'https://www.dhlottery.co.kr/main',
     LOGIN: 'https://www.dhlottery.co.kr/login',
     LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
+    MYPAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
     LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
     CHECK_WINNING: 'https://www.dhlottery.co.kr/qr.do'
 };
@@ -31114,8 +31115,26 @@ var timezone$1 = {exports: {}};
 var timezoneExports = timezone$1.exports;
 var timezone = /*@__PURE__*/getDefaultExportFromCjs(timezoneExports);
 
+class InsufficientBalanceError extends Error {
+    constructor(details) {
+        const shortage = Math.max(0, details.requiredAmount - details.currentBalance);
+        const fullDetails = Object.assign(Object.assign({}, details), { shortage });
+        super(`예치금이 부족합니다. 현재 예치금: ${formatWon(fullDetails.currentBalance)}, ` +
+            `필요 금액: ${formatWon(fullDetails.requiredAmount)}, 부족 금액: ${formatWon(fullDetails.shortage)}`);
+        this.name = 'InsufficientBalanceError';
+        this.details = fullDetails;
+    }
+}
+function isInsufficientBalanceError(error) {
+    return error instanceof InsufficientBalanceError;
+}
+function formatWon(amount) {
+    return `${amount.toLocaleString('ko-KR')}원`;
+}
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
+const LOTTO_GAME_PRICE = 1000;
 // Validate purchase availability (time-based)
 function validatePurchaseAvailability() {
     const now = dayjs.tz(Date.now(), 'Asia/Seoul');
@@ -31162,6 +31181,107 @@ function getPurchaseDiagnostics(page) {
         return [`URL: ${page.url()}`, `title: ${title}`, `bodySnippet: ${bodySnippet || 'none'}`].join(', ');
     });
 }
+function parseWon(value) {
+    const normalized = value.replace(/[^\d]/g, '');
+    if (!normalized) {
+        return null;
+    }
+    return Number(normalized);
+}
+function parseDepositBalance(text) {
+    const normalized = text.replace(/\s+/g, ' ');
+    const patterns = [
+        /예치금\s*잔액\s*[:：]?\s*([\d,]+)\s*원/,
+        /보유\s*예치금\s*[:：]?\s*([\d,]+)\s*원/,
+        /예치금\s*[:：]?\s*([\d,]+)\s*원/,
+        /잔액\s*[:：]?\s*([\d,]+)\s*원/
+    ];
+    for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        const parsed = (match === null || match === void 0 ? void 0 : match[1]) ? parseWon(match[1]) : null;
+        if (parsed !== null) {
+            return parsed;
+        }
+    }
+    return null;
+}
+function readDepositBalance(page) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const depositAmountText = yield page
+            .locator('.myPage-deposit-info.grid-item02 .deposit-box01 #totalAmt')
+            .first()
+            .innerText({ timeout: 5000 })
+            .catch(() => '');
+        const depositAmount = parseWon(depositAmountText);
+        if (depositAmount !== null) {
+            return depositAmount;
+        }
+        const depositBoxText = yield page
+            .locator('.myPage-deposit-info.grid-item02 .deposit-box01')
+            .first()
+            .innerText({ timeout: 2000 })
+            .catch(() => '');
+        const depositBoxAmount = parseDepositBalance(depositBoxText);
+        if (depositBoxAmount !== null) {
+            return depositBoxAmount;
+        }
+        const candidateSelectors = [
+            '[id*="deposit" i]',
+            '[class*="deposit" i]',
+            '[id*="balance" i]',
+            '[class*="balance" i]',
+            '[id*="money" i]',
+            '[class*="money" i]'
+        ];
+        for (const selector of candidateSelectors) {
+            const text = yield page
+                .locator(selector)
+                .first()
+                .innerText({ timeout: 1000 })
+                .catch(() => '');
+            const parsed = parseDepositBalance(text);
+            if (parsed !== null) {
+                return parsed;
+            }
+        }
+        const bodyText = yield page
+            .locator('body')
+            .innerText()
+            .catch(() => '');
+        return parseDepositBalance(bodyText);
+    });
+}
+function getDepositBalance(session) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const page = session.getPage();
+        console.log('[Purchase] Checking deposit balance');
+        yield session.navigate(URLS.MYPAGE_HOME);
+        yield page.waitForLoadState('domcontentloaded').catch(() => undefined);
+        if (page.url().includes('/login')) {
+            throw new Error('예치금 확인 실패: 마이페이지 접근 중 로그인 페이지로 이동했습니다');
+        }
+        const balance = yield readDepositBalance(page);
+        if (balance === null || Number.isNaN(balance)) {
+            throw new Error(`예치금 확인 실패: 마이페이지에서 예치금 잔액을 찾지 못했습니다 (${yield getPurchaseDiagnostics(page)})`);
+        }
+        console.log(`[Purchase] Current deposit balance: ${formatWon(balance)}`);
+        return balance;
+    });
+}
+function validateDepositBalance(session, requestedGames) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const requiredAmount = requestedGames * LOTTO_GAME_PRICE;
+        const currentBalance = yield getDepositBalance(session);
+        if (currentBalance < requiredAmount) {
+            throw new InsufficientBalanceError({
+                currentBalance,
+                requiredAmount,
+                requestedGames
+            });
+        }
+        console.log(`[Purchase] Deposit balance is enough: required ${formatWon(requiredAmount)}`);
+    });
+}
 function openPurchasePage(session, mode) {
     return __awaiter$3(this, void 0, void 0, function* () {
         const page = session.getPage();
@@ -31205,6 +31325,7 @@ function purchaseAuto(session, amount) {
         amount = Math.max(1, Math.min(5, amount));
         // Validate purchase time
         validatePurchaseAvailability();
+        yield validateDepositBalance(session, amount);
         const page = yield openPurchasePage(session, 'auto');
         // Click auto purchase button
         console.log('[Purchase] Clicking auto purchase button');
@@ -31256,6 +31377,7 @@ function purchaseManual(session, numbers) {
         });
         // Validate purchase time
         validatePurchaseAvailability();
+        yield validateDepositBalance(session, numbers.length);
         const page = yield openPurchasePage(session, 'manual');
         // Select numbers for each game
         for (let gameIdx = 0; gameIdx < numbers.length; gameIdx++) {
@@ -57123,7 +57245,8 @@ const LABELS = {
     winning_2nd: ':confetti_ball: :2nd_place_medal:',
     winning_3rd: ':confetti_ball: :3rd_place_medal:',
     winning_4th: ':tada: :four:',
-    winning_5th: ':tada: :five:'
+    winning_5th: ':tada: :five:',
+    purchase_failure: ':warning: purchase-failure'
 };
 // Initialize labels
 function initLabels() {
@@ -57151,6 +57274,18 @@ function createConsolidatedIssue(purchases) {
         const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
         yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `제${round}회 ${totalGames}게임`, body, labels: [LABELS.waiting] }));
         console.log(`Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`);
+    });
+}
+// Create a GitHub Issue for a purchase failure that needs user action
+function createPurchaseFailureIssue(details, message) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        const octokit = getOctokit();
+        const repo = getRepo();
+        const workflowRun = getContext().runId
+            ? `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${getContext().runId}`
+            : '';
+        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `로또 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
+        console.log('[Issues] Created purchase failure issue for insufficient balance');
     });
 }
 // Get all waiting issues (bug fix: get ALL open issues with waiting label)
@@ -57337,6 +57472,23 @@ function buildConsolidatedIssueBody(purchases, round, workflowRun) {
     });
     return header + sections.join('\n');
 }
+function buildPurchaseFailureIssueBody(details, message, workflowRun) {
+    return (`status: failed\n` +
+        `reason: insufficient_balance\n` +
+        `timestamp: ${new Date().toISOString()}\n` +
+        `requested_games: ${details.requestedGames}\n` +
+        `current_balance: ${details.currentBalance}\n` +
+        `required_amount: ${details.requiredAmount}\n` +
+        `shortage: ${details.shortage}\n` +
+        (workflowRun ? `workflow_run: ${workflowRun}\n` : '') +
+        `\n` +
+        `## 구매 실패 사유\n` +
+        `${message}\n\n` +
+        `## 금액\n` +
+        `- 현재 예치금: ${formatWon(details.currentBalance)}\n` +
+        `- 필요 금액: ${formatWon(details.requiredAmount)}\n` +
+        `- 부족 금액: ${formatWon(details.shortage)}\n`);
+}
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
 function getConfig() {
@@ -57406,6 +57558,21 @@ function notifyWinning(issueNumber, round, ranks) {
         const message = `🎉 *제${round}회 당첨!*\n\n` + `${results}\n\n` + `Issue #${issueNumber}`;
         console.log('[Telegram] Sending winning notification');
         yield sendMessage(message);
+    });
+}
+// Send purchase failure notification to Telegram
+function notifyPurchaseFailure(details, message) {
+    return __awaiter$3(this, void 0, void 0, function* () {
+        if (!isEnabled())
+            return;
+        const notification = `⚠️ *로또 구매 실패*\n\n` +
+            `${message}\n\n` +
+            `요청 게임 수: ${details.requestedGames}게임\n` +
+            `현재 예치금: ${formatWon(details.currentBalance)}\n` +
+            `필요 금액: ${formatWon(details.requiredAmount)}\n` +
+            `부족 금액: ${formatWon(details.shortage)}`;
+        console.log('[Telegram] Sending purchase failure notification');
+        yield sendMessage(notification);
     });
 }
 
@@ -57511,6 +57678,20 @@ function run() {
             if (error instanceof Error) {
                 console.error('[Main] Workflow error:', error.message);
                 coreExports.setFailed(error.message);
+                if (isInsufficientBalanceError(error)) {
+                    try {
+                        yield createPurchaseFailureIssue(error.details, error.message);
+                    }
+                    catch (issueError) {
+                        console.error('[Main] Failed to create purchase failure issue:', issueError);
+                    }
+                    try {
+                        yield notifyPurchaseFailure(error.details, error.message);
+                    }
+                    catch (telegramError) {
+                        console.error('[Main] Failed to notify purchase failure via Telegram:', telegramError);
+                    }
+                }
             }
             else {
                 console.error('[Main] Workflow error:', error);
