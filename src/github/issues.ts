@@ -108,14 +108,14 @@ export interface WinningResult {
 // Check winning for all waiting issues
 export async function checkWinningIssues(): Promise<WinningResult[]> {
   console.log('[Issues] Checking winning for waiting issues');
-  const winningResults: WinningResult[] = [];
+  const checkedResults: WinningResult[] = [];
 
   const issues = await getWaitingIssues();
   console.log(`[Issues] Found ${issues.length} waiting issues`);
 
   if (issues.length === 0) {
     console.log('[Issues] No waiting issues to check');
-    return winningResults;
+    return checkedResults;
   }
 
   const currentRound = getLastLottoRound();
@@ -164,11 +164,8 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
       // Update issue with results
       await updateIssueWithResults(issue.number, round, ranks);
 
-      // Track winning results for notifications
-      const hasWinning = ranks.some(r => r > 0);
-      if (hasWinning) {
-        winningResults.push({ issueNumber: issue.number, round, ranks });
-      }
+      // Track checked results for notifications and summaries.
+      checkedResults.push({ issueNumber: issue.number, round, ranks });
 
       console.log(`[Issues] Issue #${issue.number} updated with ranks:`, ranks);
     } catch (error) {
@@ -177,7 +174,7 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
   }
 
   console.log('[Issues] Finished checking all waiting issues');
-  return winningResults;
+  return checkedResults;
 }
 
 // Update issue with winning results

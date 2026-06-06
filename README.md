@@ -76,6 +76,28 @@ git push -u origin main
 
 자세한 보안 정책은 [SECURITY.md](./SECURITY.md)를 참고하세요.
 
+## 🧪 실제 구매 전 드라이런
+
+예치금이 충전된 상태에서 테스트할 때는 먼저 드라이런으로 로그인과 번호 선택까지만 확인하세요. 드라이런은 구매 버튼을 누르지 않고, GitHub Issue나 텔레그램 구매 알림도 만들지 않습니다.
+
+1. GitHub 저장소의 **Actions** 탭으로 이동합니다.
+2. `로또 구매 (수동 + 스케줄)` workflow를 선택합니다.
+3. **Run workflow**를 누릅니다.
+4. `dry-run`은 `true`, `game-count`는 `1`로 둔 뒤 실행합니다.
+
+드라이런 로그에서 정상 동작을 확인한 뒤 실제 구매를 직접 실행하려면 `dry-run`을 `false`로 바꾸고, `purchase-confirmation`에 `BUY`를 입력해야 합니다. 확인 문구가 없으면 수동 실제 구매는 로그인 전 차단됩니다.
+
+## ⏰ 자동화 스케줄
+
+기본 GitHub Actions workflow는 두 번 실행됩니다.
+
+| 한국 시간 | 용도 | 동작 |
+| --- | --- | --- |
+| 매주 토요일 21:00 | 당첨 확인 | 이전 구매 Issue만 확인하고 텔레그램으로 당첨/낙첨 요약을 보냅니다. 구매는 하지 않습니다. |
+| 매주 월요일 09:00 | 구매 | 이전 구매 당첨 여부를 확인한 뒤 새 회차 로또를 5게임 구매하고 텔레그램으로 구매 내역을 보냅니다. |
+
+로또 6/45 추첨은 토요일 20:35에 진행되므로, 당첨 확인 전용 스케줄은 결과 공개 지연을 감안해 21:00으로 잡았습니다.
+
 ## 🛠️ 워크플로우 예제
 
 기본 워크플로우는 [lotto-purchase.yml](./.github/workflows/lotto-purchase.yml)에 포함되어 있습니다. `workflow-file` 한 줄만 바꿔서 다양한 예제를 실행할 수 있습니다.
@@ -112,6 +134,36 @@ export default async ({ purchaseAuto, purchaseManual }) => {
 더 많은 예제와 API 설명은 [custom-workflows/README.md](./custom-workflows/README.md)를 참고하세요.
 
 </details>
+
+## 📊 역대 당첨번호 분석
+
+구매와 별개로, 1회부터 최신 확인 가능 회차까지 당첨번호를 가져와 빈도/최근 추세/미출현/패턴을 분석하고 추천 조합을 출력할 수 있습니다.
+
+```bash
+npm run analyze:winning
+```
+
+옵션 예시:
+
+```bash
+npm run analyze:winning -- --start 900 --recent 100 --recommendations 10
+npm run analyze:winning -- --end 1150 --seed my-strategy
+```
+
+최근 1년 1등 당첨 게임의 번호 선택 방식(자동/수동/반자동)을 분석하려면 아래 명령을 사용합니다.
+
+```bash
+npm run analyze:winning-methods
+```
+
+옵션 예시:
+
+```bash
+npm run analyze:winning-methods -- --weeks 26
+npm run analyze:winning-methods -- --start 1175 --end 1226
+```
+
+> 이 기능은 통계 필터일 뿐 당첨을 보장하지 않습니다. 실행해도 복권 구매는 일어나지 않습니다.
 
 ## 🔗 링크
 

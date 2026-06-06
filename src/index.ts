@@ -5,7 +5,7 @@ import { BrowserSession } from './core/browser';
 import { purchaseAuto, purchaseManual } from './core/purchase';
 import { generateExcluding } from './utils/numbers';
 import { initLabels, createConsolidatedIssue, checkWinningIssues } from './github/issues';
-import { notifyPurchase, notifyWinning } from './telegram/notify';
+import { notifyPurchase, notifyWinning, notifyWinningCheckSummary } from './telegram/notify';
 
 interface PurchaseMetadata {
   type: 'auto' | 'manual';
@@ -20,6 +20,10 @@ interface WorkflowApi {
 }
 
 type CustomWorkflow = (api: WorkflowApi) => Promise<unknown> | unknown;
+
+function parseBooleanInput(value: string): boolean {
+  return ['true', '1', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
+}
 
 function resolveWorkflowPath(workflowFile: string): string {
   const repoRoot = process.cwd();
@@ -73,15 +77,42 @@ async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
 async function run() {
   const session = new BrowserSession();
   const purchases: PurchaseMetadata[] = []; // Track all successful purchases
+  let dryRun = false;
+  let checkOnly = false;
 
   try {
     // Get inputs
-    const id = core.getInput('dhlottery-id', { required: true });
-    const pwd = core.getInput('dhlottery-password', { required: true });
+    checkOnly = parseBooleanInput(core.getInput('check-only') || process.env.CHECK_ONLY || 'false');
+    const id = core.getInput('dhlottery-id', { required: !checkOnly });
+    const pwd = core.getInput('dhlottery-password', { required: !checkOnly });
     const amount = Number(core.getInput('game-count') || '5');
     const workflowFile = core.getInput('workflow-file');
+    dryRun = parseBooleanInput(core.getInput('dry-run') || process.env.DRY_RUN || 'false');
+    const purchaseConfirmation = core.getInput('purchase-confirmation') || '';
 
     console.log('[Main] Starting lotto purchase action');
+    if (checkOnly) {
+      console.log('[Main] Check-only mode enabled. The action will only check previous purchases for winning.');
+    } else if (dryRun) {
+      console.log('[Main] Dry-run mode enabled. The action will stop before clicking the purchase button.');
+    } else if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && purchaseConfirmation !== 'BUY') {
+      throw new Error(
+        '[Main] Manual real purchase blocked. Set purchase-confirmation to BUY to run with dry-run=false.'
+      );
+    }
+
+    if (checkOnly) {
+      console.log('[Main] Initializing GitHub labels');
+      await initLabels();
+
+      console.log('[Main] Checking winning for previous purchases');
+      const checkedResults = await checkWinningIssues();
+
+      await notifyWinningCheckSummary(checkedResults);
+
+      console.log('[Main] Check-only mode completed. No purchase was attempted.');
+      return;
+    }
 
     // Initialize browser and login
     console.log('[Main] Initializing browser session');
@@ -93,41 +124,49 @@ async function run() {
     console.log('[Main] Logging in');
     await session.login(id, pwd);
 
-    // Initialize GitHub labels
-    console.log('[Main] Initializing GitHub labels');
-    await initLabels();
+    if (!dryRun) {
+      // Initialize GitHub labels
+      console.log('[Main] Initializing GitHub labels');
+      await initLabels();
 
-    // Check previous purchases for winning
-    console.log('[Main] Checking winning for previous purchases');
-    const winningResults = await checkWinningIssues();
+      // Check previous purchases for winning
+      console.log('[Main] Checking winning for previous purchases');
+      const checkedResults = await checkWinningIssues();
 
-    // Send Telegram notifications for winning results
-    for (const result of winningResults) {
-      await notifyWinning(result.issueNumber, result.round, result.ranks);
+      // Send Telegram notifications for winning results
+      for (const result of checkedResults.filter(result => result.ranks.some(rank => rank > 0))) {
+        await notifyWinning(result.issueNumber, result.round, result.ranks);
+      }
+    } else {
+      console.log('[Main] Skipping GitHub issue checks and Telegram winning notifications in dry-run mode');
     }
 
     // Create API with session bound to functions (no need to pass session manually)
     const api = {
       purchaseAuto: async (amt: number) => {
-        console.log(`[Main] Executing auto purchase: ${amt} games`);
-        const result = await purchaseAuto(session, amt);
-        purchases.push({
-          type: 'auto',
-          numbers: result,
-          timestamp: new Date().toISOString()
-        }); // Auto-track successful purchase
-        console.log(`[Main] Auto purchase successful: ${result.length} games`);
+        console.log(`[Main] Executing auto purchase${dryRun ? ' dry-run' : ''}: ${amt} games`);
+        const result = await purchaseAuto(session, amt, { dryRun });
+        if (!dryRun) {
+          purchases.push({
+            type: 'auto',
+            numbers: result,
+            timestamp: new Date().toISOString()
+          }); // Auto-track successful purchase
+        }
+        console.log(`[Main] Auto purchase ${dryRun ? 'dry-run completed' : 'successful'}: ${result.length} games`);
         return result;
       },
       purchaseManual: async (numbers: number[][]) => {
-        console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
-        const result = await purchaseManual(session, numbers);
-        purchases.push({
-          type: 'manual',
-          numbers: result,
-          timestamp: new Date().toISOString()
-        }); // Auto-track successful purchase
-        console.log(`[Main] Manual purchase successful: ${result.length} games`);
+        console.log(`[Main] Executing manual purchase${dryRun ? ' dry-run' : ''}: ${numbers.length} games`);
+        const result = await purchaseManual(session, numbers, { dryRun });
+        if (!dryRun) {
+          purchases.push({
+            type: 'manual',
+            numbers: result,
+            timestamp: new Date().toISOString()
+          }); // Auto-track successful purchase
+        }
+        console.log(`[Main] Manual purchase ${dryRun ? 'dry-run completed' : 'successful'}: ${result.length} games`);
         return result;
       },
       generateExcluding: (exclude: number[][], count: number) => {
@@ -148,7 +187,9 @@ async function run() {
       await api.purchaseAuto(amount);
     }
 
-    console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
+    console.log(
+      `[Main] All ${dryRun ? 'dry-run selections' : 'purchases'} completed: ${purchases.length} tracked purchases`
+    );
   } catch (error) {
     if (error instanceof Error) {
       console.error('[Main] Workflow error:', error.message);
@@ -171,6 +212,10 @@ async function run() {
       } catch (error) {
         console.error(`[Main] Failed to create consolidated issue:`, error);
       }
+    } else if (checkOnly) {
+      console.log(`[Main] Check-only completed. No issue was created for a new purchase`);
+    } else if (dryRun) {
+      console.log(`[Main] Dry-run completed. No issue or Telegram purchase notification was created`);
     } else {
       console.log(`[Main] No successful purchases to create issue`);
     }

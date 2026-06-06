@@ -31195,8 +31195,19 @@ function waitForPurchaseResults(page) {
         }
     });
 }
+function parseDisplayedNumbers(page) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        return page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
+            return elems
+                .map(it => Array.from(it.children)
+                .map(child => Number((child.textContent || '').trim()))
+                .filter(num => Number.isInteger(num)))
+                .filter(nums => nums.length > 0);
+        });
+    });
+}
 // Auto purchase function
-function purchaseAuto(session, amount) {
+function purchaseAuto(session, amount, options = {}) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!session.isAuthenticated()) {
             throw new Error('Not authenticated. Login first');
@@ -31214,6 +31225,12 @@ function purchaseAuto(session, amount) {
         console.log(`[Purchase] Selecting amount: ${amount}`);
         yield page.selectOption(SELECTORS.PURCHASE_AMOUNT_SELECT, String(amount));
         yield page.click(SELECTORS.PURCHASE_AMOUNT_CONFIRM_BTN);
+        if (options.dryRun) {
+            const selectedNumbers = yield parseDisplayedNumbers(page).catch(() => []);
+            console.log('[Purchase] Dry-run enabled. Stopping before purchase button click.');
+            console.log('[Purchase] Auto selection prepared:', selectedNumbers);
+            return selectedNumbers;
+        }
         // Purchase
         console.log('[Purchase] Clicking purchase button');
         yield page.click(SELECTORS.PURCHASE_BTN);
@@ -31222,9 +31239,7 @@ function purchaseAuto(session, amount) {
         console.log('[Purchase] Waiting for purchase results');
         yield waitForPurchaseResults(page);
         // Parse results
-        const result = yield page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
-            return elems.map(it => Array.from(it.children).map(child => Number(child.innerHTML)));
-        });
+        const result = yield parseDisplayedNumbers(page);
         if (result.length === 0 || result.some(nums => nums.length === 0)) {
             throw new Error('Failed to parse purchase results');
         }
@@ -31236,7 +31251,7 @@ function purchaseAuto(session, amount) {
     });
 }
 // Manual purchase function
-function purchaseManual(session, numbers) {
+function purchaseManual(session, numbers, options = {}) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!session.isAuthenticated()) {
             throw new Error('Not authenticated. Login first');
@@ -31282,6 +31297,12 @@ function purchaseManual(session, numbers) {
             const slotLabels = ['A', 'B', 'C', 'D', 'E'];
             console.log(`[Purchase] Game ${gameIdx + 1} added to slot ${slotLabels[gameIdx]}`);
         }
+        if (options.dryRun) {
+            const selectedNumbers = yield parseDisplayedNumbers(page).catch(() => numbers);
+            console.log('[Purchase] Dry-run enabled. Stopping before purchase button click.');
+            console.log('[Purchase] Manual selection prepared:', selectedNumbers);
+            return selectedNumbers.length > 0 ? selectedNumbers : numbers;
+        }
         // Purchase
         console.log('[Purchase] Clicking purchase button');
         yield page.click(SELECTORS.PURCHASE_BTN);
@@ -31290,9 +31311,7 @@ function purchaseManual(session, numbers) {
         console.log('[Purchase] Waiting for purchase results');
         yield waitForPurchaseResults(page);
         // Parse results
-        const result = yield page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
-            return elems.map(it => Array.from(it.children).map(child => Number(child.innerHTML)));
-        });
+        const result = yield parseDisplayedNumbers(page);
         if (result.length === 0 || result.some(nums => nums.length === 0 || nums.some(n => Number.isNaN(n)))) {
             throw new Error('Failed to parse purchase results');
         }
@@ -57800,12 +57819,12 @@ function getWaitingIssues() {
 function checkWinningIssues() {
     return __awaiter$4(this, void 0, void 0, function* () {
         console.log('[Issues] Checking winning for waiting issues');
-        const winningResults = [];
+        const checkedResults = [];
         const issues = yield getWaitingIssues();
         console.log(`[Issues] Found ${issues.length} waiting issues`);
         if (issues.length === 0) {
             console.log('[Issues] No waiting issues to check');
-            return winningResults;
+            return checkedResults;
         }
         const currentRound = getLastLottoRound();
         for (const issue of issues) {
@@ -57844,11 +57863,8 @@ function checkWinningIssues() {
                 });
                 // Update issue with results
                 yield updateIssueWithResults(issue.number, round, ranks);
-                // Track winning results for notifications
-                const hasWinning = ranks.some(r => r > 0);
-                if (hasWinning) {
-                    winningResults.push({ issueNumber: issue.number, round, ranks });
-                }
+                // Track checked results for notifications and summaries.
+                checkedResults.push({ issueNumber: issue.number, round, ranks });
                 console.log(`[Issues] Issue #${issue.number} updated with ranks:`, ranks);
             }
             catch (error) {
@@ -57856,7 +57872,7 @@ function checkWinningIssues() {
             }
         }
         console.log('[Issues] Finished checking all waiting issues');
-        return winningResults;
+        return checkedResults;
     });
 }
 // Update issue with winning results
@@ -58049,7 +58065,35 @@ function notifyWinning(issueNumber, round, ranks) {
         yield sendMessage(message);
     });
 }
+// Send a check-only summary even when all games lost.
+function notifyWinningCheckSummary(results) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        if (!isEnabled())
+            return;
+        if (results.length === 0) {
+            console.log('[Telegram] Sending empty winning-check summary');
+            yield sendMessage('🔎 *로또 당첨 확인*\n\n확인 가능한 대기 구매 내역이 없습니다.');
+            return;
+        }
+        const totalGames = results.reduce((sum, result) => sum + result.ranks.length, 0);
+        const winningGames = results.reduce((sum, result) => sum + result.ranks.filter(rank => rank > 0).length, 0);
+        const title = winningGames > 0 ? `🎉 *로또 당첨 확인: ${winningGames}게임 당첨*` : '🔎 *로또 당첨 확인: 당첨 없음*';
+        const sections = results.map(result => {
+            const lines = result.ranks.map((rank, index) => {
+                const text = rank > 0 ? `${rank}등 당첨` : '낙첨';
+                return `  ${index + 1}. ${text}`;
+            });
+            return `*제${result.round}회* (Issue #${result.issueNumber})\n${lines.join('\n')}`;
+        });
+        const message = `${title}\n` + `총 ${totalGames}게임 확인\n\n` + sections.join('\n\n');
+        console.log('[Telegram] Sending winning-check summary');
+        yield sendMessage(message);
+    });
+}
 
+function parseBooleanInput(value) {
+    return ['true', '1', 'yes', 'y', 'on'].includes(value.trim().toLowerCase());
+}
 function resolveWorkflowPath(workflowFile) {
     const repoRoot = process.cwd();
     const resolvedPath = path__namespace.resolve(repoRoot, workflowFile);
@@ -58093,13 +58137,36 @@ function run() {
     return __awaiter$4(this, void 0, void 0, function* () {
         const session = new BrowserSession();
         const purchases = []; // Track all successful purchases
+        let dryRun = false;
+        let checkOnly = false;
         try {
             // Get inputs
-            const id = coreExports.getInput('dhlottery-id', { required: true });
-            const pwd = coreExports.getInput('dhlottery-password', { required: true });
+            checkOnly = parseBooleanInput(coreExports.getInput('check-only') || process.env.CHECK_ONLY || 'false');
+            const id = coreExports.getInput('dhlottery-id', { required: !checkOnly });
+            const pwd = coreExports.getInput('dhlottery-password', { required: !checkOnly });
             const amount = Number(coreExports.getInput('game-count') || '5');
             const workflowFile = coreExports.getInput('workflow-file');
+            dryRun = parseBooleanInput(coreExports.getInput('dry-run') || process.env.DRY_RUN || 'false');
+            const purchaseConfirmation = coreExports.getInput('purchase-confirmation') || '';
             console.log('[Main] Starting lotto purchase action');
+            if (checkOnly) {
+                console.log('[Main] Check-only mode enabled. The action will only check previous purchases for winning.');
+            }
+            else if (dryRun) {
+                console.log('[Main] Dry-run mode enabled. The action will stop before clicking the purchase button.');
+            }
+            else if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && purchaseConfirmation !== 'BUY') {
+                throw new Error('[Main] Manual real purchase blocked. Set purchase-confirmation to BUY to run with dry-run=false.');
+            }
+            if (checkOnly) {
+                console.log('[Main] Initializing GitHub labels');
+                yield initLabels();
+                console.log('[Main] Checking winning for previous purchases');
+                const checkedResults = yield checkWinningIssues();
+                yield notifyWinningCheckSummary(checkedResults);
+                console.log('[Main] Check-only mode completed. No purchase was attempted.');
+                return;
+            }
             // Initialize browser and login
             console.log('[Main] Initializing browser session');
             yield session.init({
@@ -58108,38 +58175,47 @@ function run() {
             });
             console.log('[Main] Logging in');
             yield session.login(id, pwd);
-            // Initialize GitHub labels
-            console.log('[Main] Initializing GitHub labels');
-            yield initLabels();
-            // Check previous purchases for winning
-            console.log('[Main] Checking winning for previous purchases');
-            const winningResults = yield checkWinningIssues();
-            // Send Telegram notifications for winning results
-            for (const result of winningResults) {
-                yield notifyWinning(result.issueNumber, result.round, result.ranks);
+            if (!dryRun) {
+                // Initialize GitHub labels
+                console.log('[Main] Initializing GitHub labels');
+                yield initLabels();
+                // Check previous purchases for winning
+                console.log('[Main] Checking winning for previous purchases');
+                const checkedResults = yield checkWinningIssues();
+                // Send Telegram notifications for winning results
+                for (const result of checkedResults.filter(result => result.ranks.some(rank => rank > 0))) {
+                    yield notifyWinning(result.issueNumber, result.round, result.ranks);
+                }
+            }
+            else {
+                console.log('[Main] Skipping GitHub issue checks and Telegram winning notifications in dry-run mode');
             }
             // Create API with session bound to functions (no need to pass session manually)
             const api = {
                 purchaseAuto: (amt) => __awaiter$4(this, void 0, void 0, function* () {
-                    console.log(`[Main] Executing auto purchase: ${amt} games`);
-                    const result = yield purchaseAuto(session, amt);
-                    purchases.push({
-                        type: 'auto',
-                        numbers: result,
-                        timestamp: new Date().toISOString()
-                    }); // Auto-track successful purchase
-                    console.log(`[Main] Auto purchase successful: ${result.length} games`);
+                    console.log(`[Main] Executing auto purchase${dryRun ? ' dry-run' : ''}: ${amt} games`);
+                    const result = yield purchaseAuto(session, amt, { dryRun });
+                    if (!dryRun) {
+                        purchases.push({
+                            type: 'auto',
+                            numbers: result,
+                            timestamp: new Date().toISOString()
+                        }); // Auto-track successful purchase
+                    }
+                    console.log(`[Main] Auto purchase ${dryRun ? 'dry-run completed' : 'successful'}: ${result.length} games`);
                     return result;
                 }),
                 purchaseManual: (numbers) => __awaiter$4(this, void 0, void 0, function* () {
-                    console.log(`[Main] Executing manual purchase: ${numbers.length} games`);
-                    const result = yield purchaseManual(session, numbers);
-                    purchases.push({
-                        type: 'manual',
-                        numbers: result,
-                        timestamp: new Date().toISOString()
-                    }); // Auto-track successful purchase
-                    console.log(`[Main] Manual purchase successful: ${result.length} games`);
+                    console.log(`[Main] Executing manual purchase${dryRun ? ' dry-run' : ''}: ${numbers.length} games`);
+                    const result = yield purchaseManual(session, numbers, { dryRun });
+                    if (!dryRun) {
+                        purchases.push({
+                            type: 'manual',
+                            numbers: result,
+                            timestamp: new Date().toISOString()
+                        }); // Auto-track successful purchase
+                    }
+                    console.log(`[Main] Manual purchase ${dryRun ? 'dry-run completed' : 'successful'}: ${result.length} games`);
                     return result;
                 }),
                 generateExcluding: (exclude, count) => {
@@ -58159,7 +58235,7 @@ function run() {
                 console.log(`[Main] Running default auto purchase: ${amount} games`);
                 yield api.purchaseAuto(amount);
             }
-            console.log(`[Main] All purchases completed: ${purchases.length} total purchases`);
+            console.log(`[Main] All ${dryRun ? 'dry-run selections' : 'purchases'} completed: ${purchases.length} tracked purchases`);
         }
         catch (error) {
             if (error instanceof Error) {
@@ -58185,6 +58261,12 @@ function run() {
                 catch (error) {
                     console.error(`[Main] Failed to create consolidated issue:`, error);
                 }
+            }
+            else if (checkOnly) {
+                console.log(`[Main] Check-only completed. No issue was created for a new purchase`);
+            }
+            else if (dryRun) {
+                console.log(`[Main] Dry-run completed. No issue or Telegram purchase notification was created`);
             }
             else {
                 console.log(`[Main] No successful purchases to create issue`);

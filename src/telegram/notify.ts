@@ -45,3 +45,34 @@ export async function notifyWinning(issueNumber: number, round: number, ranks: n
   console.log('[Telegram] Sending winning notification');
   await sendMessage(message);
 }
+
+// Send a check-only summary even when all games lost.
+export async function notifyWinningCheckSummary(
+  results: Array<{ issueNumber: number; round: number; ranks: number[] }>
+): Promise<void> {
+  if (!isEnabled()) return;
+
+  if (results.length === 0) {
+    console.log('[Telegram] Sending empty winning-check summary');
+    await sendMessage('🔎 *로또 당첨 확인*\n\n확인 가능한 대기 구매 내역이 없습니다.');
+    return;
+  }
+
+  const totalGames = results.reduce((sum, result) => sum + result.ranks.length, 0);
+  const winningGames = results.reduce((sum, result) => sum + result.ranks.filter(rank => rank > 0).length, 0);
+  const title = winningGames > 0 ? `🎉 *로또 당첨 확인: ${winningGames}게임 당첨*` : '🔎 *로또 당첨 확인: 당첨 없음*';
+
+  const sections = results.map(result => {
+    const lines = result.ranks.map((rank, index) => {
+      const text = rank > 0 ? `${rank}등 당첨` : '낙첨';
+      return `  ${index + 1}. ${text}`;
+    });
+
+    return `*제${result.round}회* (Issue #${result.issueNumber})\n${lines.join('\n')}`;
+  });
+
+  const message = `${title}\n` + `총 ${totalGames}게임 확인\n\n` + sections.join('\n\n');
+
+  console.log('[Telegram] Sending winning-check summary');
+  await sendMessage(message);
+}

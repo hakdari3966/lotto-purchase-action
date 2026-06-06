@@ -19,8 +19,20 @@ inputs:
     default: ''
   game-count:
     required: false
-    description: '자동 구매 게임 수 (1-5, 기본값: 5)'
-    default: '5'
+    description: '자동 구매 게임 수 (1-5, 기본값: 1)'
+    default: '1'
+  dry-run:
+    required: false
+    description: 'true이면 로그인/번호 선택까지만 진행하고 구매 버튼을 누르지 않습니다.'
+    default: 'false'
+  check-only:
+    required: false
+    description: 'true이면 이전 구매 당첨 여부만 확인하고 구매는 진행하지 않습니다.'
+    default: 'false'
+  purchase-confirmation:
+    required: false
+    description: '수동 실행에서 dry-run=false로 실제 구매하려면 BUY를 입력해야 합니다.'
+    default: ''
   workflow-file:
     required: false
     description: '커스텀 워크플로우 스크립트 경로 (예: ".github/workflows/lotto-workflow.js")'
