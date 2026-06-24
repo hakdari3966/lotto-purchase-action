@@ -22,10 +22,5 @@ SOFTWARE.
 
 ---
 
-This project includes portions derived from rich-automation's open-source work,
-licensed under the MIT License:
-
-  - rich-automation/lotto-module (https://github.com/rich-automation/lotto-module)
-  - rich-automation/lotto-archive-action (https://github.com/rich-automation/lotto-archive-action)
-
-  Copyright (c) 2023 rich-automation
+This project contains third-party software components licensed under the MIT License.
+Please see THIRD_PARTY_NOTICES.md for details and original license notices.
