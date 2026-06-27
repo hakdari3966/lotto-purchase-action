@@ -30829,6 +30829,7 @@ const URLS = {
     LOGIN: 'https://www.dhlottery.co.kr/login',
     LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
     LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
+    MY_PAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
     CHECK_WINNING: 'https://www.dhlottery.co.kr/qr.do'
 };
 // DOM selectors for Playwright automation
@@ -31085,6 +31086,41 @@ class BrowserSession {
             ].join(', ');
         });
     }
+}
+
+const BALANCE_PATTERNS = [
+    /(?:예치금|보유예치금|예치금\s*잔액|잔액)\s*(?:잔액|현재잔액|보유금액)?\s*[:：]?\s*([0-9,]+)\s*원/,
+    /([0-9,]+)\s*원\s*(?:예치금|보유예치금|잔액)/
+];
+function parseDepositBalance(text) {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    for (const pattern of BALANCE_PATTERNS) {
+        const match = normalized.match(pattern);
+        const amount = match === null || match === void 0 ? void 0 : match[1];
+        if (amount) {
+            return `${amount}원`;
+        }
+    }
+    return null;
+}
+function getDepositBalance(session) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        if (!session.isAuthenticated()) {
+            throw new Error('Not authenticated. Login first');
+        }
+        const page = session.getPage();
+        console.log('[Balance] Navigating to my page');
+        yield page.goto(URLS.MY_PAGE_HOME, { waitUntil: 'load', timeout: GOTO_TIMEOUT });
+        const bodyText = yield page.locator('body').innerText({ timeout: GOTO_TIMEOUT });
+        const balance = parseDepositBalance(bodyText);
+        if (!balance) {
+            const snippet = bodyText.replace(/\s+/g, ' ').slice(0, 300);
+            console.warn(`[Balance] Failed to parse deposit balance from my page: ${snippet}`);
+            return null;
+        }
+        console.log(`[Balance] Deposit balance parsed: ${balance}`);
+        return balance;
+    });
 }
 
 var dayjs_min = {exports: {}};
@@ -58033,19 +58069,20 @@ function sendMessage(text) {
 }
 
 // Send purchase notification to Telegram
-function notifyPurchase(purchases) {
+function notifyPurchase(purchases, depositBalance) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!isEnabled())
             return;
         const round = getNextLottoRound();
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        const balanceLine = depositBalance ? `예치금 잔액: \`${depositBalance}\`\n` : '';
         const sections = purchases.map((purchase, index) => {
             const typeLabel = purchase.type === 'auto' ? '자동' : '수동';
             const link = getCheckWinningLink(purchase.numbers, round);
             const numbersText = purchase.numbers.map((nums, i) => `  ${i + 1}. \`${nums.join(', ')}\``).join('\n');
             return `*#${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
         });
-        const message = `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n\n` + sections.join('\n\n');
+        const message = `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n` + balanceLine + `\n` + sections.join('\n\n');
         console.log('[Telegram] Sending purchase notification');
         yield sendMessage(message);
     });
@@ -58255,8 +58292,12 @@ function run() {
                     yield createConsolidatedIssue(purchases);
                     const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
                     console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+                    const depositBalance = yield getDepositBalance(session).catch(error => {
+                        console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
+                        return null;
+                    });
                     // Send Telegram notification for purchases
-                    yield notifyPurchase(purchases);
+                    yield notifyPurchase(purchases, depositBalance);
                 }
                 catch (error) {
                     console.error(`[Main] Failed to create consolidated issue:`, error);

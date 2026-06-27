@@ -4,6 +4,7 @@ export const URLS = {
   LOGIN: 'https://www.dhlottery.co.kr/login',
   LOGOUT: 'https://www.dhlottery.co.kr/logout.do',
   LOTTO_645: 'https://ol.dhlottery.co.kr/olotto/game/game645.do',
+  MY_PAGE_HOME: 'https://www.dhlottery.co.kr/mypage/home',
   CHECK_WINNING: 'https://www.dhlottery.co.kr/qr.do'
 };
 

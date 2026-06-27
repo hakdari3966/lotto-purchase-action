@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { BrowserSession } from './core/browser';
+import { getDepositBalance } from './core/balance';
 import { purchaseAuto, purchaseManual } from './core/purchase';
 import { generateExcluding } from './utils/numbers';
 import { initLabels, createConsolidatedIssue, checkWinningIssues } from './github/issues';
@@ -207,8 +208,13 @@ async function run() {
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
         console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
 
+        const depositBalance = await getDepositBalance(session).catch(error => {
+          console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
+          return null;
+        });
+
         // Send Telegram notification for purchases
-        await notifyPurchase(purchases);
+        await notifyPurchase(purchases, depositBalance);
       } catch (error) {
         console.error(`[Main] Failed to create consolidated issue:`, error);
       }

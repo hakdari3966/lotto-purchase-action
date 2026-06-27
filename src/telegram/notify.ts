@@ -9,11 +9,12 @@ interface PurchaseMetadata {
 }
 
 // Send purchase notification to Telegram
-export async function notifyPurchase(purchases: PurchaseMetadata[]): Promise<void> {
+export async function notifyPurchase(purchases: PurchaseMetadata[], depositBalance?: string | null): Promise<void> {
   if (!isEnabled()) return;
 
   const round = getNextLottoRound();
   const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+  const balanceLine = depositBalance ? `예치금 잔액: \`${depositBalance}\`\n` : '';
 
   const sections = purchases.map((purchase, index) => {
     const typeLabel = purchase.type === 'auto' ? '자동' : '수동';
@@ -23,7 +24,8 @@ export async function notifyPurchase(purchases: PurchaseMetadata[]): Promise<voi
     return `*#${index + 1} (${typeLabel})*\n${numbersText}\n[당첨확인](${link})`;
   });
 
-  const message = `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n\n` + sections.join('\n\n');
+  const message =
+    `🎰 *제${round}회 로또 구매 완료*\n` + `총 ${totalGames}게임\n` + balanceLine + `\n` + sections.join('\n\n');
 
   console.log('[Telegram] Sending purchase notification');
   await sendMessage(message);
