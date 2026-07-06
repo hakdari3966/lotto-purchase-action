@@ -1,20 +1,45 @@
 import type { BrowserSession } from './browser';
 import { GOTO_TIMEOUT, URLS } from './config';
 
-const BALANCE_PATTERNS = [
-  /(?:예치금|보유예치금|예치금\s*잔액|잔액)\s*(?:잔액|현재잔액|보유금액)?\s*[:：]?\s*([0-9,]+)\s*원/,
-  /([0-9,]+)\s*원\s*(?:예치금|보유예치금|잔액)/
-];
+const MONEY_PATTERN = /([0-9,]+)\s*원/;
+const DEPOSIT_LABEL_PATTERN = /예치금/;
 
-function parseDepositBalance(text: string): string | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+function formatMoney(amount: string): string {
+  return `${amount}원`;
+}
 
-  for (const pattern of BALANCE_PATTERNS) {
-    const match = normalized.match(pattern);
-    const amount = match?.[1];
-    if (amount) {
-      return `${amount}원`;
+export function parseDepositBalance(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+
+    if (!DEPOSIT_LABEL_PATTERN.test(line)) {
+      continue;
     }
+
+    const sameLineAmount = line.slice(line.search(DEPOSIT_LABEL_PATTERN)).match(MONEY_PATTERN)?.[1];
+    if (sameLineAmount) {
+      return formatMoney(sameLineAmount);
+    }
+
+    for (const candidate of lines.slice(index + 1, index + 6)) {
+      const amount = candidate.match(MONEY_PATTERN)?.[1];
+      if (amount) {
+        return formatMoney(amount);
+      }
+    }
+  }
+
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const depositIndex = normalized.search(DEPOSIT_LABEL_PATTERN);
+  if (depositIndex >= 0) {
+    const nearbyText = normalized.slice(depositIndex, depositIndex + 160);
+    const amount = nearbyText.match(MONEY_PATTERN)?.[1];
+    return amount ? formatMoney(amount) : null;
   }
 
   return null;
