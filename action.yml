@@ -19,7 +19,7 @@ inputs:
     default: ''
   game-count:
     required: false
-    description: '자동 구매 게임 수 (1-5, 기본값: 1)'
+    description: '자동 구매 게임 수 (기본 workflow는 1-10 지원, 기본값: 1)'
     default: '1'
   dry-run:
     required: false

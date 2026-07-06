@@ -13,7 +13,7 @@
 
 | 파일                          | 용도                                      | 수정 포인트                         |
 | ----------------------------- | ----------------------------------------- | ----------------------------------- |
-| `01-auto-basic.js`            | 가장 먼저 실행해보기 좋은 기본 예제       | `GAME_COUNT`                        |
+| `01-auto-basic.js`            | 가장 먼저 실행해보기 좋은 기본 예제       | `GAME_COUNT` (최대 10게임)          |
 | `02-manual-fixed-numbers.js`  | 고정 번호를 직접 넣어 수동 구매할 때      | `NUMBERS`                           |
 | `03-auto-plus-manual.js`      | 자동 구매와 수동 구매를 함께 쓰고 싶을 때 | `AUTO_GAME_COUNT`, `MANUAL_NUMBERS` |
 | `04-gemini-recommendation.js` | Gemini API로 추천 번호를 받아 구매할 때   | `MODEL`, `FALLBACK_NUMBERS`         |
