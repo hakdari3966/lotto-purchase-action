@@ -1,19 +1,56 @@
 name: 로또 구매 (수동 + 스케줄)
 on:
   schedule:
-    # 매주 일요일 UTC 03:00 (한국 시간 일요일 낮12:00)
+    # 매주 토요일 UTC 12:00 (한국 시간 토요일 21:00) - 당첨 확인/알림만
+    - cron: '0 12 * * 6'
+    # 매주 월요일 UTC 00:00 (한국 시간 월요일 09:00)
     # https://elmah.io/tools/cron-parser/
-    - cron: '0 3 * * 0'
+    - cron: '0 0 * * 1'
   workflow_dispatch: # Allow manual trigger
+    inputs:
+      dry-run:
+        description: '구매 버튼을 누르지 않고 로그인/번호 선택까지만 테스트'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      game-count:
+        description: '자동 구매 게임 수'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+          - '7'
+          - '8'
+          - '9'
+          - '10'
+      purchase-confirmation:
+        description: '실제 구매 dry-run=false 실행 시 BUY 입력 필요'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: lotto-purchase-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   purchase:
     runs-on: ubuntu-latest
     container: mcr.microsoft.com/playwright:v1.55.1-jammy
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -29,7 +66,22 @@ jobs:
           github-token: ${{ github.token }}
           telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           telegram-chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          telegram-notify-purchase: ${{ secrets.TELEGRAM_NOTIFY_PURCHASE || 'true' }}
+          apns-key-id: ${{ secrets.APNS_KEY_ID }}
+          apns-team-id: ${{ secrets.APNS_TEAM_ID }}
+          apns-bundle-id: ${{ secrets.APNS_BUNDLE_ID }}
+          apns-private-key: ${{ secrets.APNS_PRIVATE_KEY }}
+          apns-device-token: ${{ secrets.APNS_DEVICE_TOKEN }}
+          apns-use-sandbox: ${{ secrets.APNS_USE_SANDBOX || 'true' }}
+          check-only: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * 6' && 'true' || 'false' }}
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+          game-count: ${{ github.event_name == 'workflow_dispatch' && inputs.game-count || '5' }}
+          purchase-confirmation: ${{ github.event_name == 'workflow_dispatch' && inputs.purchase-confirmation || 'SCHEDULED' }}
           # 아래 예제 중 하나만 활성화해서 사용하세요.
           workflow-file: custom-workflows/01-auto-basic.js
           # workflow-file: custom-workflows/02-manual-fixed-numbers.js
           # workflow-file: custom-workflows/03-auto-plus-manual.js
+        env:
+          CHECK_ONLY: ${{ github.event_name == 'schedule' && github.event.schedule == '0 12 * * 6' && 'true' || 'false' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+          GAME_COUNT: ${{ github.event_name == 'workflow_dispatch' && inputs.game-count || '5' }}

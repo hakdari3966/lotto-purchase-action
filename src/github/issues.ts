@@ -61,7 +61,10 @@ export interface PurchaseMetadata {
 }
 
 // Create a consolidated GitHub Issue for multiple purchases
-export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Promise<void> {
+export async function createConsolidatedIssue(
+  purchases: PurchaseMetadata[],
+  depositBalance?: string | null
+): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
 
@@ -71,7 +74,7 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
   // Calculate total games
   const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
 
-  const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
+  const body = buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance);
 
   await octokit.rest.issues.create({
     ...repo,
@@ -108,14 +111,14 @@ export async function getWaitingIssues() {
   const octokit = getOctokit();
   const repo = getRepo();
 
-  const issues = await octokit.rest.issues.listForRepo({
+  const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
     ...repo,
     state: 'open',
     labels: LABELS.waiting,
     per_page: 100
   });
 
-  return issues.data;
+  return issues;
 }
 
 // Winning result for an issue
@@ -128,14 +131,14 @@ export interface WinningResult {
 // Check winning for all waiting issues
 export async function checkWinningIssues(): Promise<WinningResult[]> {
   console.log('[Issues] Checking winning for waiting issues');
-  const winningResults: WinningResult[] = [];
+  const checkedResults: WinningResult[] = [];
 
   const issues = await getWaitingIssues();
   console.log(`[Issues] Found ${issues.length} waiting issues`);
 
   if (issues.length === 0) {
     console.log('[Issues] No waiting issues to check');
-    return winningResults;
+    return checkedResults;
   }
 
   const currentRound = getLastLottoRound();
@@ -182,13 +185,10 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
       });
 
       // Update issue with results
-      await updateIssueWithResults(issue.number, ranks);
+      await updateIssueWithResults(issue.number, round, ranks);
 
-      // Track winning results for notifications
-      const hasWinning = ranks.some(r => r > 0);
-      if (hasWinning) {
-        winningResults.push({ issueNumber: issue.number, round, ranks });
-      }
+      // Track checked results for notifications and summaries.
+      checkedResults.push({ issueNumber: issue.number, round, ranks });
 
       console.log(`[Issues] Issue #${issue.number} updated with ranks:`, ranks);
     } catch (error) {
@@ -197,17 +197,17 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
   }
 
   console.log('[Issues] Finished checking all waiting issues');
-  return winningResults;
+  return checkedResults;
 }
 
 // Update issue with winning results
-async function updateIssueWithResults(issueNumber: number, ranks: number[]): Promise<void> {
+async function updateIssueWithResults(issueNumber: number, round: number, ranks: number[]): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
   const context = getContext();
 
   // Convert ranks to labels
-  const labels = ranks.map(rankToLabel);
+  const labels = Array.from(new Set(ranks.map(rankToLabel)));
 
   // Check if all games lost
   const allLost = ranks.every(r => r === 0);
@@ -226,7 +226,7 @@ async function updateIssueWithResults(issueNumber: number, ranks: number[]): Pro
     await octokit.rest.issues.createComment({
       ...repo,
       issue_number: issueNumber,
-      body: `@${context.repo.owner} ${winningGames}게임에 당첨됐습니다!`
+      body: buildWinningComment(context.repo.owner, round, ranks, winningGames)
     });
 
     // Remove losing labels and keep only winning ones
@@ -237,6 +237,15 @@ async function updateIssueWithResults(issueNumber: number, ranks: number[]): Pro
       labels: winningLabels
     });
   }
+}
+
+function buildWinningComment(owner: string, round: number, ranks: number[], winningGames: number): string {
+  const lines = ranks.map((rank, index) => {
+    const result = rank > 0 ? `${rank}등` : '낙첨';
+    return `- ${index + 1}번 게임: ${result}`;
+  });
+
+  return [`@${owner} 제${round}회 ${winningGames}게임에 당첨됐습니다!`, '', ...lines].join('\n');
 }
 
 // Helper: Convert rank to label
@@ -345,8 +354,16 @@ function buildIssueBody(data: { date: string; round: number; numbers: number[][]
 }
 
 // Helper: Build consolidated issue body with multiple purchases
-function buildConsolidatedIssueBody(purchases: PurchaseMetadata[], round: number, workflowRun: string): string {
-  const header = `workflow_run: ${workflowRun}\nround: ${round}\n`;
+function buildConsolidatedIssueBody(
+  purchases: PurchaseMetadata[],
+  round: number,
+  workflowRun: string,
+  depositBalance?: string | null
+): string {
+  const header =
+    `workflow_run: ${workflowRun}\n` +
+    `round: ${round}\n` +
+    (depositBalance ? `deposit_balance: ${depositBalance}\n` : '');
 
   const sections = purchases.map((purchase, index) => {
     const link = getCheckWinningLink(purchase.numbers, round);

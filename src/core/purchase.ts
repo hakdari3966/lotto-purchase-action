@@ -10,6 +10,9 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const LOTTO_GAME_PRICE = 1000;
+interface PurchaseOptions {
+  dryRun?: boolean;
+}
 
 // Validate purchase availability (time-based)
 function validatePurchaseAvailability(): void {
@@ -213,14 +216,31 @@ async function waitForPurchaseResults(page: Page): Promise<void> {
   }
 }
 
+async function parseDisplayedNumbers(page: Page): Promise<number[][]> {
+  return page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
+    return elems
+      .map(it =>
+        Array.from(it.children)
+          .map(child => Number((((child as any).textContent as string) || '').trim()))
+          .filter(num => Number.isInteger(num))
+      )
+      .filter(nums => nums.length > 0);
+  });
+}
+
 // Auto purchase function
-export async function purchaseAuto(session: BrowserSession, amount: number): Promise<number[][]> {
+export async function purchaseAuto(
+  session: BrowserSession,
+  amount: number,
+  options: PurchaseOptions = {}
+): Promise<number[][]> {
   if (!session.isAuthenticated()) {
     throw new Error('Not authenticated. Login first');
   }
 
-  // Validate amount
-  amount = Math.max(1, Math.min(5, amount));
+  if (!Number.isInteger(amount) || amount < 1 || amount > 5) {
+    throw new Error('자동 구매 게임 수는 1~5 사이의 정수여야 합니다');
+  }
 
   // Validate purchase time
   validatePurchaseAvailability();
@@ -237,6 +257,13 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
   await page.selectOption(SELECTORS.PURCHASE_AMOUNT_SELECT, String(amount));
   await page.click(SELECTORS.PURCHASE_AMOUNT_CONFIRM_BTN);
 
+  if (options.dryRun) {
+    const selectedNumbers = await parseDisplayedNumbers(page).catch(() => []);
+    console.log('[Purchase] Dry-run enabled. Stopping before purchase button click.');
+    console.log('[Purchase] Auto selection prepared:', selectedNumbers);
+    return selectedNumbers;
+  }
+
   // Purchase
   console.log('[Purchase] Clicking purchase button');
   await page.click(SELECTORS.PURCHASE_BTN);
@@ -247,12 +274,14 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
   await waitForPurchaseResults(page);
 
   // Parse results
-  const result = await page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
-    return elems.map(it => Array.from(it.children).map(child => Number((child as any).innerHTML)));
-  });
+  const result = await parseDisplayedNumbers(page);
 
   if (result.length === 0 || result.some(nums => nums.length === 0)) {
     throw new Error('Failed to parse purchase results');
+  }
+
+  if (result.length !== amount) {
+    throw new Error(`구매 결과 게임 수가 요청과 다릅니다 (requested: ${amount}, purchased: ${result.length})`);
   }
 
   console.log('[Purchase] Auto purchase completed:', result);
@@ -260,7 +289,11 @@ export async function purchaseAuto(session: BrowserSession, amount: number): Pro
 }
 
 // Manual purchase function
-export async function purchaseManual(session: BrowserSession, numbers: number[][]): Promise<number[][]> {
+export async function purchaseManual(
+  session: BrowserSession,
+  numbers: number[][],
+  options: PurchaseOptions = {}
+): Promise<number[][]> {
   if (!session.isAuthenticated()) {
     throw new Error('Not authenticated. Login first');
   }
@@ -316,6 +349,13 @@ export async function purchaseManual(session: BrowserSession, numbers: number[][
     console.log(`[Purchase] Game ${gameIdx + 1} added to slot ${slotLabels[gameIdx]}`);
   }
 
+  if (options.dryRun) {
+    const selectedNumbers = await parseDisplayedNumbers(page).catch(() => numbers);
+    console.log('[Purchase] Dry-run enabled. Stopping before purchase button click.');
+    console.log('[Purchase] Manual selection prepared:', selectedNumbers);
+    return selectedNumbers.length > 0 ? selectedNumbers : numbers;
+  }
+
   // Purchase
   console.log('[Purchase] Clicking purchase button');
   await page.click(SELECTORS.PURCHASE_BTN);
@@ -326,9 +366,7 @@ export async function purchaseManual(session: BrowserSession, numbers: number[][
   await waitForPurchaseResults(page);
 
   // Parse results
-  const result = await page.$$eval(SELECTORS.PURCHASE_NUMBER_LIST, elems => {
-    return elems.map(it => Array.from(it.children).map(child => Number((child as any).innerHTML)));
-  });
+  const result = await parseDisplayedNumbers(page);
 
   if (result.length === 0 || result.some(nums => nums.length === 0 || nums.some(n => Number.isNaN(n)))) {
     throw new Error('Failed to parse purchase results');

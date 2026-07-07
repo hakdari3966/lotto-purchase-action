@@ -7,6 +7,8 @@
   "license": "MIT",
   "packageManager": "npm@11.8.0",
   "scripts": {
+    "analyze:winning": "node scripts/analyze-winning-numbers.js",
+    "analyze:winning-methods": "node scripts/analyze-winning-methods.js",
     "build": "rm -rf dist/**/**.js && rollup --config rollup.config.ts --configPlugin @rollup/plugin-typescript",
     "fix": "eslint src --fix && prettier --write \"src/**/*.{ts,tsx,js}\"",
     "lint": "tsc --noEmit && eslint src && prettier --check \"src/**/*.{ts,tsx,js}\"",

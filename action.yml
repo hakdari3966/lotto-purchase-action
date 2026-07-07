@@ -19,8 +19,20 @@ inputs:
     default: ''
   game-count:
     required: false
-    description: '자동 구매 게임 수 (1-5, 기본값: 5)'
-    default: '5'
+    description: '자동 구매 게임 수 (기본 workflow는 1-10 지원, 기본값: 1)'
+    default: '1'
+  dry-run:
+    required: false
+    description: 'true이면 로그인/번호 선택까지만 진행하고 구매 버튼을 누르지 않습니다.'
+    default: 'false'
+  check-only:
+    required: false
+    description: 'true이면 이전 구매 당첨 여부만 확인하고 구매는 진행하지 않습니다.'
+    default: 'false'
+  purchase-confirmation:
+    required: false
+    description: '수동 실행에서 dry-run=false로 실제 구매하려면 BUY를 입력해야 합니다.'
+    default: ''
   workflow-file:
     required: false
     description: '커스텀 워크플로우 스크립트 경로 (예: ".github/workflows/lotto-workflow.js")'
@@ -33,6 +45,34 @@ inputs:
     required: false
     description: '텔레그램 채팅 ID (optional, 알림용)'
     default: ''
+  telegram-notify-purchase:
+    required: false
+    description: 'false이면 구매 완료 텔레그램 알림을 보내지 않습니다.'
+    default: 'true'
+  apns-key-id:
+    required: false
+    description: 'Apple Developer APNs Auth Key ID'
+    default: ''
+  apns-team-id:
+    required: false
+    description: 'Apple Developer Team ID'
+    default: ''
+  apns-bundle-id:
+    required: false
+    description: 'iPhone 앱 Bundle ID'
+    default: ''
+  apns-private-key:
+    required: false
+    description: 'APNs Auth Key private key (.p8 contents)'
+    default: ''
+  apns-device-token:
+    required: false
+    description: 'iPhone 앱에서 복사한 APNs device token'
+    default: ''
+  apns-use-sandbox:
+    required: false
+    description: 'true이면 개발용 APNs sandbox를 사용합니다.'
+    default: 'true'
 runs:
   using: 'node24'
   main: 'dist/index.js'
