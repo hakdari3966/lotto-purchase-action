@@ -57850,7 +57850,7 @@ function initLabels() {
     });
 }
 // Create a consolidated GitHub Issue for multiple purchases
-function createConsolidatedIssue(purchases) {
+function createConsolidatedIssue(purchases, depositBalance) {
     return __awaiter$4(this, void 0, void 0, function* () {
         const octokit = getOctokit();
         const repo = getRepo();
@@ -57858,7 +57858,7 @@ function createConsolidatedIssue(purchases) {
         const round = getNextLottoRound();
         // Calculate total games
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-        const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
+        const body = buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance);
         yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `제${round}회 ${totalGames}게임`, body, labels: [LABELS.waiting] }));
         console.log(`Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`);
     });
@@ -58038,8 +58038,10 @@ function parseIssueBody(body) {
     };
 }
 // Helper: Build consolidated issue body with multiple purchases
-function buildConsolidatedIssueBody(purchases, round, workflowRun) {
-    const header = `workflow_run: ${workflowRun}\nround: ${round}\n`;
+function buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance) {
+    const header = `workflow_run: ${workflowRun}\n` +
+        `round: ${round}\n` +
+        (depositBalance ? `deposit_balance: ${depositBalance}\n` : '');
     const sections = purchases.map((purchase, index) => {
         const link = getCheckWinningLink(purchase.numbers, round);
         const typeLabel = purchase.type === 'auto' ? 'Auto' : 'Manual';
@@ -58310,13 +58312,13 @@ function run() {
             // Create one consolidated issue for all successful purchases
             if (purchases.length > 0) {
                 try {
-                    yield createConsolidatedIssue(purchases);
-                    const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-                    console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
                     const depositBalance = yield getDepositBalance(session).catch(error => {
                         console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
                         return null;
                     });
+                    yield createConsolidatedIssue(purchases, depositBalance);
+                    const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+                    console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
                     // Send Telegram notification for purchases
                     yield notifyPurchase(purchases, depositBalance);
                 }

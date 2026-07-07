@@ -59,7 +59,10 @@ export interface PurchaseMetadata {
 }
 
 // Create a consolidated GitHub Issue for multiple purchases
-export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Promise<void> {
+export async function createConsolidatedIssue(
+  purchases: PurchaseMetadata[],
+  depositBalance?: string | null
+): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
 
@@ -69,7 +72,7 @@ export async function createConsolidatedIssue(purchases: PurchaseMetadata[]): Pr
   // Calculate total games
   const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
 
-  const body = buildConsolidatedIssueBody(purchases, round, workflowRun);
+  const body = buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance);
 
   await octokit.rest.issues.create({
     ...repo,
@@ -331,8 +334,16 @@ function buildIssueBody(data: { date: string; round: number; numbers: number[][]
 }
 
 // Helper: Build consolidated issue body with multiple purchases
-function buildConsolidatedIssueBody(purchases: PurchaseMetadata[], round: number, workflowRun: string): string {
-  const header = `workflow_run: ${workflowRun}\nround: ${round}\n`;
+function buildConsolidatedIssueBody(
+  purchases: PurchaseMetadata[],
+  round: number,
+  workflowRun: string,
+  depositBalance?: string | null
+): string {
+  const header =
+    `workflow_run: ${workflowRun}\n` +
+    `round: ${round}\n` +
+    (depositBalance ? `deposit_balance: ${depositBalance}\n` : '');
 
   const sections = purchases.map((purchase, index) => {
     const link = getCheckWinningLink(purchase.numbers, round);

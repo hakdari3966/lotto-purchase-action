@@ -204,14 +204,14 @@ async function run() {
     // Create one consolidated issue for all successful purchases
     if (purchases.length > 0) {
       try {
-        await createConsolidatedIssue(purchases);
-        const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-        console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
-
         const depositBalance = await getDepositBalance(session).catch(error => {
           console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
           return null;
         });
+
+        await createConsolidatedIssue(purchases, depositBalance);
+        const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
+        console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
 
         // Send Telegram notification for purchases
         await notifyPurchase(purchases, depositBalance);
