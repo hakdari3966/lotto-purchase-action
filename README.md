@@ -66,6 +66,27 @@ git push -u origin main
 
 > **💡 참고**: `GITHUB_TOKEN`은 GitHub가 자동으로 제공하므로 직접 추가할 필요가 없습니다.
 
+## 👥 친구와 독립적으로 쓰기
+
+각 사용자는 아래 항목을 **완전히 따로** 가져야 합니다.
+
+| 항목 | 나 | 친구 |
+| --- | --- | --- |
+| GitHub 저장소 | 내 `lotto-purchase-action` repo | 친구의 `lotto-purchase-action` repo |
+| 동행복권 계정 | 내 `DHLOTTERY_ID`, `DHLOTTERY_PASSWORD` | 친구의 `DHLOTTERY_ID`, `DHLOTTERY_PASSWORD` |
+| 알림 채널 | 내 Telegram bot/chat | 친구 Telegram bot/chat |
+| 구매/당첨 기록 | 내 GitHub Issues | 친구 GitHub Issues |
+| iPhone 앱 설정 | 내 GitHub owner/repo/token | 친구 GitHub owner/repo/token |
+
+친구용 설정 순서:
+
+1. 친구 GitHub 계정에 이 저장소를 Fork하거나, 친구의 Private 저장소로 Clone 후 Push합니다.
+2. 친구 저장소의 Actions를 활성화합니다.
+3. 친구 저장소 Secrets에 친구의 `DHLOTTERY_ID`, `DHLOTTERY_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`를 등록합니다.
+4. 친구 iPhone 앱 설정에서 친구의 GitHub `owner`, `repo`, private repo 접근용 token을 입력합니다.
+
+동행복권 아이디/비밀번호는 iPhone 앱에 넣지 않습니다. 앱은 GitHub Issue에 기록된 구매/당첨/예치금 요약만 읽습니다.
+
 ## 🔒 비밀번호는 안전한가요?
 
 **안전합니다.** 동행복권 아이디와 비밀번호는 [GitHub Actions Secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)에 저장됩니다.
