@@ -9,9 +9,23 @@ function getConfig() {
   return { token, chatId };
 }
 
+function parseBooleanInput(value: string, fallback = true): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  return ['true', '1', 'yes', 'y', 'on'].includes(normalized);
+}
+
 export function isEnabled(): boolean {
   const { token, chatId } = getConfig();
   return Boolean(token && chatId);
+}
+
+export function isPurchaseNotificationEnabled(): boolean {
+  const value = core.getInput('telegram-notify-purchase') || process.env.TELEGRAM_NOTIFY_PURCHASE || 'true';
+  return parseBooleanInput(value, true);
 }
 
 export async function sendMessage(text: string): Promise<void> {

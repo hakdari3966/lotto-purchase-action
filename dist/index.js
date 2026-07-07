@@ -58062,9 +58062,20 @@ function getConfig$1() {
     const chatId = coreExports.getInput('telegram-chat-id');
     return { token, chatId };
 }
+function parseBooleanInput$1(value, fallback = true) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+        return fallback;
+    }
+    return ['true', '1', 'yes', 'y', 'on'].includes(normalized);
+}
 function isEnabled() {
     const { token, chatId } = getConfig$1();
     return Boolean(token && chatId);
+}
+function isPurchaseNotificationEnabled() {
+    const value = coreExports.getInput('telegram-notify-purchase') || process.env.TELEGRAM_NOTIFY_PURCHASE || 'true';
+    return parseBooleanInput$1(value, true);
 }
 function sendMessage(text) {
     return __awaiter$4(this, void 0, void 0, function* () {
@@ -58098,6 +58109,10 @@ function notifyPurchase(purchases, depositBalance) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!isEnabled())
             return;
+        if (!isPurchaseNotificationEnabled()) {
+            console.log('[Telegram] Purchase notification disabled');
+            return;
+        }
         const round = getNextLottoRound();
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
         const balanceLine = depositBalance ? `예치금 잔액: \`${depositBalance}\`\n` : '';

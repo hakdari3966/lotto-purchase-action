@@ -63,6 +63,7 @@ git push -u origin main
 | `DHLOTTERY_PASSWORD` | ✅ 필수 | 동행복권 로그인 비밀번호 |
 | `TELEGRAM_BOT_TOKEN` | 선택 | 알림용 텔레그램 봇 토큰 |
 | `TELEGRAM_CHAT_ID` | 선택 | 알림용 텔레그램 채팅 ID |
+| `TELEGRAM_NOTIFY_PURCHASE` | 선택 | `false`이면 구매 완료 텔레그램 알림을 보내지 않음 |
 | `APNS_KEY_ID` | 선택 | iPhone 앱 푸시용 Apple APNs Auth Key ID |
 | `APNS_TEAM_ID` | 선택 | Apple Developer Team ID |
 | `APNS_BUNDLE_ID` | 선택 | iPhone 앱 Bundle ID. 기본 앱은 `com.bangju.lottostatus` |
@@ -92,6 +93,8 @@ git push -u origin main
 4. 친구 iPhone 앱 설정에서 친구의 GitHub `owner`, `repo`, private repo 접근용 token을 입력합니다.
 
 동행복권 아이디/비밀번호는 iPhone 앱에 넣지 않습니다. 앱은 GitHub Issue에 기록된 구매/당첨/예치금 요약만 읽습니다.
+
+친구 구매 내역은 텔레그램으로 안 받고 당첨 확인만 받고 싶다면, 친구 저장소 Secrets에 `TELEGRAM_NOTIFY_PURCHASE=false`를 추가하면 됩니다. 이 경우 구매 완료 메시지는 건너뛰고, 토요일 당첨 확인/당첨 발생 메시지는 그대로 전송됩니다.
 
 ## 📱 iPhone 앱 푸시 알림
 

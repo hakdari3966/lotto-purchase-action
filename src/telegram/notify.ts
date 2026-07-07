@@ -1,4 +1,4 @@
-import { isEnabled, sendMessage } from './client';
+import { isEnabled, isPurchaseNotificationEnabled, sendMessage } from './client';
 import { getCheckWinningLink } from '../utils/winning';
 import { getNextLottoRound } from '../utils/rounds';
 
@@ -11,6 +11,10 @@ interface PurchaseMetadata {
 // Send purchase notification to Telegram
 export async function notifyPurchase(purchases: PurchaseMetadata[], depositBalance?: string | null): Promise<void> {
   if (!isEnabled()) return;
+  if (!isPurchaseNotificationEnabled()) {
+    console.log('[Telegram] Purchase notification disabled');
+    return;
+  }
 
   const round = getNextLottoRound();
   const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);

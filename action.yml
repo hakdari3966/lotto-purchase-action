@@ -45,6 +45,10 @@ inputs:
     required: false
     description: '텔레그램 채팅 ID (optional, 알림용)'
     default: ''
+  telegram-notify-purchase:
+    required: false
+    description: 'false이면 구매 완료 텔레그램 알림을 보내지 않습니다.'
+    default: 'true'
   apns-key-id:
     required: false
     description: 'Apple Developer APNs Auth Key ID'
