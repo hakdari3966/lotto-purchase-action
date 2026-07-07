@@ -63,6 +63,12 @@ git push -u origin main
 | `DHLOTTERY_PASSWORD` | ✅ 필수 | 동행복권 로그인 비밀번호 |
 | `TELEGRAM_BOT_TOKEN` | 선택 | 알림용 텔레그램 봇 토큰 |
 | `TELEGRAM_CHAT_ID` | 선택 | 알림용 텔레그램 채팅 ID |
+| `APNS_KEY_ID` | 선택 | iPhone 앱 푸시용 Apple APNs Auth Key ID |
+| `APNS_TEAM_ID` | 선택 | Apple Developer Team ID |
+| `APNS_BUNDLE_ID` | 선택 | iPhone 앱 Bundle ID. 기본 앱은 `com.bangju.lottostatus` |
+| `APNS_PRIVATE_KEY` | 선택 | APNs `.p8` private key 전체 내용 |
+| `APNS_DEVICE_TOKEN` | 선택 | iPhone 앱 설정 화면에서 복사한 device token |
+| `APNS_USE_SANDBOX` | 선택 | 개발/TestFlight 전에는 `true`, App Store 배포 후에는 `false` |
 
 > **💡 참고**: `GITHUB_TOKEN`은 GitHub가 자동으로 제공하므로 직접 추가할 필요가 없습니다.
 
@@ -86,6 +92,17 @@ git push -u origin main
 4. 친구 iPhone 앱 설정에서 친구의 GitHub `owner`, `repo`, private repo 접근용 token을 입력합니다.
 
 동행복권 아이디/비밀번호는 iPhone 앱에 넣지 않습니다. 앱은 GitHub Issue에 기록된 구매/당첨/예치금 요약만 읽습니다.
+
+## 📱 iPhone 앱 푸시 알림
+
+iPhone 앱으로 구매/당첨 알림을 받으려면 Apple Developer 계정의 APNs 설정이 필요합니다.
+
+1. iPhone 앱을 실제 기기에 설치합니다.
+2. 앱 설정에서 **알림 권한 요청**을 누른 뒤 **디바이스 토큰 복사**를 누릅니다.
+3. GitHub Actions Secrets에 `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY`, `APNS_DEVICE_TOKEN`을 등록합니다.
+4. 개발 빌드나 TestFlight 전 단계에서는 `APNS_USE_SANDBOX`를 `true`로 둡니다.
+
+APNs Secrets가 없으면 앱 푸시는 건너뛰고, 기존 텔레그램/Issue 기록은 그대로 동작합니다.
 
 ## 🔒 비밀번호는 안전한가요?
 

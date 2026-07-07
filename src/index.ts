@@ -7,6 +7,7 @@ import { purchaseAuto, purchaseManual } from './core/purchase';
 import { generateExcluding } from './utils/numbers';
 import { initLabels, createConsolidatedIssue, checkWinningIssues } from './github/issues';
 import { notifyPurchase, notifyWinning, notifyWinningCheckSummary } from './telegram/notify';
+import { notifyApnsPurchase, notifyApnsWinning, notifyApnsWinningCheckSummary } from './push/apns';
 
 interface PurchaseMetadata {
   type: 'auto' | 'manual';
@@ -110,6 +111,7 @@ async function run() {
       const checkedResults = await checkWinningIssues();
 
       await notifyWinningCheckSummary(checkedResults);
+      await notifyApnsWinningCheckSummary(checkedResults);
 
       console.log('[Main] Check-only mode completed. No purchase was attempted.');
       return;
@@ -137,6 +139,7 @@ async function run() {
       // Send Telegram notifications for winning results
       for (const result of checkedResults.filter(result => result.ranks.some(rank => rank > 0))) {
         await notifyWinning(result.issueNumber, result.round, result.ranks);
+        await notifyApnsWinning(result.issueNumber, result.round, result.ranks);
       }
     } else {
       console.log('[Main] Skipping GitHub issue checks and Telegram winning notifications in dry-run mode');
@@ -215,6 +218,7 @@ async function run() {
 
         // Send Telegram notification for purchases
         await notifyPurchase(purchases, depositBalance);
+        await notifyApnsPurchase(purchases, depositBalance);
       } catch (error) {
         console.error(`[Main] Failed to create consolidated issue:`, error);
       }

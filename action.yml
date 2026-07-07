@@ -45,6 +45,30 @@ inputs:
     required: false
     description: '텔레그램 채팅 ID (optional, 알림용)'
     default: ''
+  apns-key-id:
+    required: false
+    description: 'Apple Developer APNs Auth Key ID'
+    default: ''
+  apns-team-id:
+    required: false
+    description: 'Apple Developer Team ID'
+    default: ''
+  apns-bundle-id:
+    required: false
+    description: 'iPhone 앱 Bundle ID'
+    default: ''
+  apns-private-key:
+    required: false
+    description: 'APNs Auth Key private key (.p8 contents)'
+    default: ''
+  apns-device-token:
+    required: false
+    description: 'iPhone 앱에서 복사한 APNs device token'
+    default: ''
+  apns-use-sandbox:
+    required: false
+    description: 'true이면 개발용 APNs sandbox를 사용합니다.'
+    default: 'true'
 runs:
   using: 'node24'
   main: 'dist/index.js'
