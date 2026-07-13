@@ -2,6 +2,7 @@ import { getOctokit, getRepo, getContext } from './client';
 import { fetchWinningNumbers, checkWinning, getCheckWinningLink } from '../utils/winning';
 import { getLastLottoRound, getNextLottoRound } from '../utils/rounds';
 import { formatWon, type InsufficientBalanceDetails } from '../core/errors';
+import { type PurchaseMetadata } from '../tracking/types';
 
 // Labels for GitHub Issues
 const LABELS = {
@@ -32,6 +33,13 @@ export async function initLabels(): Promise<void> {
   );
 }
 
+export async function isIssuesEnabled(): Promise<boolean> {
+  const octokit = getOctokit();
+  const repo = getRepo();
+  const response = await octokit.rest.repos.get({ ...repo });
+  return Boolean(response.data.has_issues);
+}
+
 // Create a GitHub Issue for a purchase
 export async function createPurchaseIssue(numbers: number[][]): Promise<void> {
   const octokit = getOctokit();
@@ -53,18 +61,11 @@ export async function createPurchaseIssue(numbers: number[][]): Promise<void> {
   console.log(`Created issue for ${numbers.length} games on ${date}`);
 }
 
-// Purchase metadata interface
-export interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-}
-
 // Create a consolidated GitHub Issue for multiple purchases
 export async function createConsolidatedIssue(
   purchases: PurchaseMetadata[],
   depositBalance?: string | null
-): Promise<void> {
+): Promise<number> {
   const octokit = getOctokit();
   const repo = getRepo();
 
@@ -76,7 +77,7 @@ export async function createConsolidatedIssue(
 
   const body = buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance);
 
-  await octokit.rest.issues.create({
+  const response = await octokit.rest.issues.create({
     ...repo,
     title: `제${round}회 ${totalGames}게임`,
     body,
@@ -86,6 +87,7 @@ export async function createConsolidatedIssue(
   console.log(
     `Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`
   );
+  return response.data.number;
 }
 
 // Create a GitHub Issue for a purchase failure that needs user action
@@ -201,7 +203,7 @@ export async function checkWinningIssues(): Promise<WinningResult[]> {
 }
 
 // Update issue with winning results
-async function updateIssueWithResults(issueNumber: number, round: number, ranks: number[]): Promise<void> {
+export async function updateIssueWithResults(issueNumber: number, round: number, ranks: number[]): Promise<void> {
   const octokit = getOctokit();
   const repo = getRepo();
   const context = getContext();

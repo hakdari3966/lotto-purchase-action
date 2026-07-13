@@ -6,15 +6,15 @@ import { getDepositBalance } from './core/balance';
 import { purchaseAuto, purchaseManual } from './core/purchase';
 import { isInsufficientBalanceError } from './core/errors';
 import { generateExcluding } from './utils/numbers';
-import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, checkWinningIssues } from './github/issues';
+import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, isIssuesEnabled } from './github/issues';
+import {
+  recordPurchaseHistory,
+  attachIssueNumberToPurchaseHistory,
+  checkPurchaseHistory
+} from './github/purchase-history';
 import { notifyPurchase, notifyPurchaseFailure, notifyWinning, notifyWinningCheckSummary } from './telegram/notify';
 import { notifyApnsPurchase, notifyApnsWinning, notifyApnsWinningCheckSummary } from './push/apns';
-
-interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-}
+import { type PurchaseMetadata } from './tracking/types';
 
 interface WorkflowApi {
   purchaseAuto: (amount: number) => Promise<number[][]>;
@@ -82,6 +82,7 @@ async function run() {
   const purchases: PurchaseMetadata[] = []; // Track all successful purchases
   let dryRun = false;
   let checkOnly = false;
+  let issuesEnabled = false;
 
   try {
     // Get inputs
@@ -105,11 +106,8 @@ async function run() {
     }
 
     if (checkOnly) {
-      console.log('[Main] Initializing GitHub labels');
-      await initLabels();
-
-      console.log('[Main] Checking winning for previous purchases');
-      const checkedResults = await checkWinningIssues();
+      console.log('[Main] Checking winning for tracked purchases');
+      const checkedResults = await checkPurchaseHistory();
 
       await notifyWinningCheckSummary(checkedResults);
       await notifyApnsWinningCheckSummary(checkedResults);
@@ -129,18 +127,28 @@ async function run() {
     await session.login(id, pwd);
 
     if (!dryRun) {
-      // Initialize GitHub labels
-      console.log('[Main] Initializing GitHub labels');
-      await initLabels();
+      issuesEnabled = await isIssuesEnabled().catch(error => {
+        console.warn(
+          '[Main] Failed to check GitHub Issues availability:',
+          error instanceof Error ? error.message : error
+        );
+        return false;
+      });
 
-      // Check previous purchases for winning
-      console.log('[Main] Checking winning for previous purchases');
-      const checkedResults = await checkWinningIssues();
+      if (issuesEnabled) {
+        console.log('[Main] Initializing GitHub labels');
+        await initLabels();
+      } else {
+        console.log('[Main] GitHub Issues are disabled. Purchase history will use repository storage only.');
+      }
+
+      console.log('[Main] Checking winning for tracked purchases');
+      const checkedResults = await checkPurchaseHistory();
 
       // Send Telegram notifications for winning results
-      for (const result of checkedResults.filter(result => result.ranks.some(rank => rank > 0))) {
-        await notifyWinning(result.issueNumber, result.round, result.ranks);
-        await notifyApnsWinning(result.issueNumber, result.round, result.ranks);
+      for (const result of checkedResults.filter(entry => entry.ranks.some(rank => rank > 0))) {
+        await notifyWinning(result);
+        await notifyApnsWinning(result);
       }
     } else {
       console.log('[Main] Skipping GitHub issue checks and Telegram winning notifications in dry-run mode');
@@ -221,21 +229,38 @@ async function run() {
   } finally {
     // Create one consolidated issue for all successful purchases
     if (purchases.length > 0) {
+      let purchaseRecordId: string | null = null;
       try {
         const depositBalance = await getDepositBalance(session).catch(error => {
           console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
           return null;
         });
 
-        await createConsolidatedIssue(purchases, depositBalance);
+        const record = await recordPurchaseHistory(purchases, depositBalance);
+        purchaseRecordId = record.id;
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-        console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+
+        if (issuesEnabled) {
+          try {
+            const issueNumber = await createConsolidatedIssue(purchases, depositBalance);
+            if (purchaseRecordId) {
+              await attachIssueNumberToPurchaseHistory(purchaseRecordId, issueNumber);
+            }
+            console.log(
+              `[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`
+            );
+          } catch (error) {
+            console.error('[Main] Failed to create consolidated issue:', error);
+          }
+        } else {
+          console.log('[Main] Skipping issue creation because GitHub Issues are disabled');
+        }
 
         // Send Telegram notification for purchases
         await notifyPurchase(purchases, depositBalance);
         await notifyApnsPurchase(purchases, depositBalance);
       } catch (error) {
-        console.error(`[Main] Failed to create consolidated issue:`, error);
+        console.error('[Main] Failed to record purchase history or send notifications:', error);
       }
     } else if (checkOnly) {
       console.log(`[Main] Check-only completed. No issue was created for a new purchase`);

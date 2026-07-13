@@ -2,12 +2,7 @@ import { isEnabled, isPurchaseNotificationEnabled, sendMessage } from './client'
 import { getCheckWinningLink } from '../utils/winning';
 import { getNextLottoRound } from '../utils/rounds';
 import { formatWon, type InsufficientBalanceDetails } from '../core/errors';
-
-interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-}
+import { formatTrackingReference, type PurchaseMetadata, type WinningCheckResult } from '../tracking/types';
 
 // Send purchase notification to Telegram
 export async function notifyPurchase(purchases: PurchaseMetadata[], depositBalance?: string | null): Promise<void> {
@@ -37,17 +32,16 @@ export async function notifyPurchase(purchases: PurchaseMetadata[], depositBalan
 }
 
 // Send winning notification to Telegram (only when there are winners)
-export async function notifyWinning(issueNumber: number, round: number, ranks: number[]): Promise<void> {
+export async function notifyWinning(result: WinningCheckResult): Promise<void> {
   if (!isEnabled()) return;
 
-  const winningGames = ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(r => r.rank > 0);
+  const winningGames = result.ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(r => r.rank > 0);
 
   if (winningGames.length === 0) return;
 
   const rankEmojis = ['', '🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
   const results = winningGames.map(g => `  ${rankEmojis[g.rank]} ${g.game}번 게임: ${g.rank}등 당첨!`).join('\n');
-
-  const message = `🎉 *제${round}회 당첨!*\n\n` + `${results}\n\n` + `Issue #${issueNumber}`;
+  const message = `🎉 *제${result.round}회 당첨!*\n\n` + `${results}\n\n` + `${formatTrackingReference(result)}`;
 
   console.log('[Telegram] Sending winning notification');
   await sendMessage(message);
@@ -65,9 +59,7 @@ export async function notifyPurchaseFailure(details: InsufficientBalanceDetails,
 }
 
 // Send a check-only summary even when all games lost.
-export async function notifyWinningCheckSummary(
-  results: Array<{ issueNumber: number; round: number; ranks: number[] }>
-): Promise<void> {
+export async function notifyWinningCheckSummary(results: WinningCheckResult[]): Promise<void> {
   if (!isEnabled()) return;
 
   if (results.length === 0) {
@@ -86,7 +78,7 @@ export async function notifyWinningCheckSummary(
       return `  ${index + 1}. ${text}`;
     });
 
-    return `*제${result.round}회* (Issue #${result.issueNumber})\n${lines.join('\n')}`;
+    return `*제${result.round}회* (${formatTrackingReference(result)})\n${lines.join('\n')}`;
   });
 
   const message = `${title}\n` + `총 ${totalGames}게임 확인\n\n` + sections.join('\n\n');

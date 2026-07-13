@@ -31096,6 +31096,10 @@ const DEPOSIT_LABEL_PATTERN = /예치금/;
 function formatMoney(amount) {
     return `${amount}원`;
 }
+function parseWon$1(value) {
+    const normalized = value.replace(/[^\d]/g, '');
+    return normalized ? formatMoney(normalized) : null;
+}
 function parseDepositBalance$1(text) {
     var _a, _b, _c;
     const lines = text
@@ -31127,6 +31131,53 @@ function parseDepositBalance$1(text) {
     }
     return null;
 }
+function readDepositBalanceFromPage(session) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const page = session.getPage();
+        const directAmount = yield page
+            .locator('.myPage-deposit-info.grid-item02 .deposit-box01 #totalAmt')
+            .first()
+            .innerText({ timeout: 5000 })
+            .catch(() => '');
+        const directBalance = parseWon$1(directAmount);
+        if (directBalance) {
+            return directBalance;
+        }
+        const depositBoxText = yield page
+            .locator('.myPage-deposit-info.grid-item02 .deposit-box01')
+            .first()
+            .innerText({ timeout: 2000 })
+            .catch(() => '');
+        const depositBoxBalance = parseDepositBalance$1(depositBoxText);
+        if (depositBoxBalance) {
+            return depositBoxBalance;
+        }
+        const candidateSelectors = [
+            '[id*="deposit" i]',
+            '[class*="deposit" i]',
+            '[id*="balance" i]',
+            '[class*="balance" i]',
+            '[id*="money" i]',
+            '[class*="money" i]'
+        ];
+        for (const selector of candidateSelectors) {
+            const text = yield page
+                .locator(selector)
+                .first()
+                .innerText({ timeout: 1000 })
+                .catch(() => '');
+            const parsed = parseDepositBalance$1(text);
+            if (parsed) {
+                return parsed;
+            }
+        }
+        const bodyText = yield page
+            .locator('body')
+            .innerText({ timeout: GOTO_TIMEOUT })
+            .catch(() => '');
+        return parseDepositBalance$1(bodyText);
+    });
+}
 function getDepositBalance$1(session) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!session.isAuthenticated()) {
@@ -31135,9 +31186,12 @@ function getDepositBalance$1(session) {
         const page = session.getPage();
         console.log('[Balance] Navigating to my page');
         yield page.goto(URLS.MY_PAGE_HOME, { waitUntil: 'load', timeout: GOTO_TIMEOUT });
-        const bodyText = yield page.locator('body').innerText({ timeout: GOTO_TIMEOUT });
-        const balance = parseDepositBalance$1(bodyText);
+        const balance = yield readDepositBalanceFromPage(session);
         if (!balance) {
+            const bodyText = yield page
+                .locator('body')
+                .innerText({ timeout: GOTO_TIMEOUT })
+                .catch(() => '');
             const snippet = bodyText.replace(/\s+/g, ' ').slice(0, 300);
             console.warn(`[Balance] Failed to parse deposit balance from my page: ${snippet}`);
             return null;
@@ -57948,6 +58002,10 @@ function getLastLottoRound() {
     return 1000 + additionalRound;
 }
 
+function formatTrackingReference(result) {
+    return result.issueNumber ? `Issue #${result.issueNumber}` : `기록 ${result.trackingId.slice(0, 8)}`;
+}
+
 // Labels for GitHub Issues
 const LABELS = {
     waiting: ':hourglass:',
@@ -57973,6 +58031,14 @@ function initLabels() {
             .map(([description, name]) => octokit.rest.issues.createLabel(Object.assign({ name, description }, repo))));
     });
 }
+function isIssuesEnabled() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const octokit = getOctokit();
+        const repo = getRepo();
+        const response = yield octokit.rest.repos.get(Object.assign({}, repo));
+        return Boolean(response.data.has_issues);
+    });
+}
 // Create a consolidated GitHub Issue for multiple purchases
 function createConsolidatedIssue(purchases, depositBalance) {
     return __awaiter$4(this, void 0, void 0, function* () {
@@ -57983,8 +58049,9 @@ function createConsolidatedIssue(purchases, depositBalance) {
         // Calculate total games
         const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
         const body = buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance);
-        yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `제${round}회 ${totalGames}게임`, body, labels: [LABELS.waiting] }));
+        const response = yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `제${round}회 ${totalGames}게임`, body, labels: [LABELS.waiting] }));
         console.log(`Created consolidated issue for ${purchases.length} purchases (${totalGames} total games) for round ${round}`);
+        return response.data.number;
     });
 }
 // Create a GitHub Issue for a purchase failure that needs user action
@@ -57997,75 +58064,6 @@ function createPurchaseFailureIssue(details, message) {
             : '';
         yield octokit.rest.issues.create(Object.assign(Object.assign({}, repo), { title: `로또 구매 실패 - 예치금 부족 (${new Date().toISOString().slice(0, 10)})`, body: buildPurchaseFailureIssueBody(details, message, workflowRun), labels: [LABELS.purchase_failure] }));
         console.log('[Issues] Created purchase failure issue for insufficient balance');
-    });
-}
-// Get all waiting issues (bug fix: get ALL open issues with waiting label)
-function getWaitingIssues() {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        const octokit = getOctokit();
-        const repo = getRepo();
-        const issues = yield octokit.paginate(octokit.rest.issues.listForRepo, Object.assign(Object.assign({}, repo), { state: 'open', labels: LABELS.waiting, per_page: 100 }));
-        return issues;
-    });
-}
-// Check winning for all waiting issues
-function checkWinningIssues() {
-    return __awaiter$4(this, void 0, void 0, function* () {
-        console.log('[Issues] Checking winning for waiting issues');
-        const checkedResults = [];
-        const issues = yield getWaitingIssues();
-        console.log(`[Issues] Found ${issues.length} waiting issues`);
-        if (issues.length === 0) {
-            console.log('[Issues] No waiting issues to check');
-            return checkedResults;
-        }
-        const currentRound = getLastLottoRound();
-        for (const issue of issues) {
-            try {
-                const body = issue.body || '';
-                let round;
-                let allNumbers;
-                // Detect format and parse accordingly
-                if (isConsolidatedFormat(body)) {
-                    // New consolidated format
-                    const parsed = parseConsolidatedIssueBody(body);
-                    round = parsed.round;
-                    // Flatten all numbers from all purchases
-                    allNumbers = parsed.purchases.flatMap(p => p.numbers);
-                    console.log(`[Issues] Checking consolidated issue #${issue.number} with ${parsed.purchases.length} purchases (${allNumbers.length} games)`);
-                }
-                else {
-                    // Legacy format
-                    const parsed = parseIssueBody(body);
-                    round = parsed.round;
-                    allNumbers = parsed.numbers;
-                    console.log(`[Issues] Checking legacy issue #${issue.number} with ${allNumbers.length} games`);
-                }
-                // Skip if winning numbers not available yet
-                if (round > currentRound) {
-                    console.log(`[Issues] Issue #${issue.number}: Round ${round} not drawn yet (current: ${currentRound})`);
-                    continue;
-                }
-                console.log(`[Issues] Checking issue #${issue.number} for round ${round}`);
-                // Fetch winning numbers
-                const winningNumbers = yield fetchWinningNumbers(round);
-                // Check each game
-                const ranks = allNumbers.map(nums => {
-                    const result = checkWinning(nums, winningNumbers);
-                    return result.rank;
-                });
-                // Update issue with results
-                yield updateIssueWithResults(issue.number, round, ranks);
-                // Track checked results for notifications and summaries.
-                checkedResults.push({ issueNumber: issue.number, round, ranks });
-                console.log(`[Issues] Issue #${issue.number} updated with ranks:`, ranks);
-            }
-            catch (error) {
-                console.error(`[Issues] Error checking issue #${issue.number}:`, error);
-            }
-        }
-        console.log('[Issues] Finished checking all waiting issues');
-        return checkedResults;
     });
 }
 // Update issue with winning results
@@ -58112,67 +58110,6 @@ function rankToLabel(rank) {
     ];
     return (_a = labelMap[rank]) !== null && _a !== void 0 ? _a : LABELS.losing;
 }
-// Helper: Check if issue body uses consolidated format
-function isConsolidatedFormat(body) {
-    return body.includes('## Purchase');
-}
-// Helper: Parse consolidated issue body (new format)
-function parseConsolidatedIssueBody(body) {
-    var _a;
-    const lines = body.split('\n');
-    const getValue = (line) => line.split(':').slice(1).join(':').trim();
-    // Parse header
-    const workflowRun = getValue(lines[0] || '');
-    const round = Number(getValue(lines[1] || ''));
-    // Parse purchases
-    const purchases = [];
-    let currentPurchase = null;
-    for (let i = 2; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line)
-            continue;
-        if (line.startsWith('## Purchase')) {
-            // Save previous purchase if exists
-            if (currentPurchase) {
-                purchases.push(currentPurchase);
-            }
-            // Start new purchase
-            currentPurchase = {};
-        }
-        else if (currentPurchase && line.includes(':')) {
-            const key = (_a = line.split(':')[0]) === null || _a === void 0 ? void 0 : _a.trim();
-            const value = getValue(line);
-            if (key === 'timestamp') {
-                currentPurchase.timestamp = value;
-            }
-            else if (key === 'type') {
-                currentPurchase.type = value;
-            }
-            else if (key === 'numbers') {
-                currentPurchase.numbers = JSON.parse(value || '[]');
-            }
-            else if (key === 'link') {
-                currentPurchase.link = value;
-            }
-        }
-    }
-    // Save last purchase
-    if (currentPurchase) {
-        purchases.push(currentPurchase);
-    }
-    return { workflowRun, round, purchases };
-}
-// Helper: Parse issue body (legacy format)
-function parseIssueBody(body) {
-    const lines = body.split('\n');
-    const getValue = (line) => { var _a, _b; return (_b = (_a = line.split(':')[1]) === null || _a === void 0 ? void 0 : _a.trim()) !== null && _b !== void 0 ? _b : ''; };
-    return {
-        date: getValue(lines[0] || ''),
-        round: Number(getValue(lines[1] || '')),
-        numbers: JSON.parse(getValue(lines[2] || '[]')),
-        link: getValue(lines[3] || '')
-    };
-}
 // Helper: Build consolidated issue body with multiple purchases
 function buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance) {
     const header = `workflow_run: ${workflowRun}\n` +
@@ -58200,6 +58137,132 @@ function buildPurchaseFailureIssueBody(details, message, workflowRun) {
         `${message}\n\n` +
         `## 금액\n` +
         `- 현재 예치금: ${formatWon(details.currentBalance)}\n`);
+}
+
+const STORAGE_PATH = '.github/lotto-purchase-history.json';
+const STORAGE_VERSION = 1;
+function getEmptyState() {
+    return {
+        version: STORAGE_VERSION,
+        records: []
+    };
+}
+function loadHistoryState() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const octokit = getOctokit();
+        const repo = getRepo();
+        try {
+            const response = yield octokit.rest.repos.getContent(Object.assign(Object.assign({}, repo), { path: STORAGE_PATH }));
+            if (Array.isArray(response.data) || !('content' in response.data)) {
+                throw new Error(`[History] Expected a file at ${STORAGE_PATH}`);
+            }
+            const content = Buffer.from(response.data.content, 'base64').toString('utf8');
+            const parsed = JSON.parse(content);
+            return {
+                sha: response.data.sha,
+                state: {
+                    version: typeof parsed.version === 'number' ? parsed.version : STORAGE_VERSION,
+                    records: Array.isArray(parsed.records) ? parsed.records : []
+                }
+            };
+        }
+        catch (error) {
+            if (typeof error === 'object' && error && 'status' in error && error.status === 404) {
+                return { state: getEmptyState() };
+            }
+            throw error;
+        }
+    });
+}
+function saveHistoryState(state, message, sha) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const octokit = getOctokit();
+        const repo = getRepo();
+        const content = Buffer.from(`${JSON.stringify(state, null, 2)}\n`, 'utf8').toString('base64');
+        yield octokit.rest.repos.createOrUpdateFileContents(Object.assign(Object.assign({}, repo), { path: STORAGE_PATH, message,
+            content,
+            sha }));
+    });
+}
+function recordPurchaseHistory(purchases, depositBalance) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const { state, sha } = yield loadHistoryState();
+        const createdAt = new Date().toISOString();
+        const record = {
+            id: crypto__namespace.randomUUID(),
+            round: getNextLottoRound(),
+            createdAt,
+            status: 'waiting',
+            purchases,
+            depositBalance: depositBalance !== null && depositBalance !== void 0 ? depositBalance : null
+        };
+        state.records.unshift(record);
+        yield saveHistoryState(state, `chore: record lotto purchase ${record.id}`, sha);
+        console.log(`[History] Recorded purchase history: ${record.id}`);
+        return record;
+    });
+}
+function attachIssueNumberToPurchaseHistory(recordId, issueNumber) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const { state, sha } = yield loadHistoryState();
+        const record = state.records.find(entry => entry.id === recordId);
+        if (!record) {
+            coreExports.warning(`[History] Purchase record not found for issue attachment: ${recordId}`);
+            return;
+        }
+        record.issueNumber = issueNumber;
+        yield saveHistoryState(state, `chore: link lotto issue #${issueNumber}`, sha);
+        console.log(`[History] Linked purchase record ${recordId} to issue #${issueNumber}`);
+    });
+}
+function checkPurchaseHistory() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const { state, sha } = yield loadHistoryState();
+        const pendingRecords = state.records.filter(record => record.status === 'waiting');
+        if (pendingRecords.length === 0) {
+            console.log('[History] No waiting purchase records');
+            return [];
+        }
+        const currentRound = getLastLottoRound();
+        const issuesEnabled = yield isIssuesEnabled().catch(error => {
+            console.warn('[History] Failed to check GitHub Issues availability:', error instanceof Error ? error.message : error);
+            return false;
+        });
+        const checkedResults = [];
+        let changed = false;
+        for (const record of pendingRecords) {
+            if (record.round > currentRound) {
+                console.log(`[History] Record ${record.id}: Round ${record.round} not drawn yet (current: ${currentRound})`);
+                continue;
+            }
+            const numbers = record.purchases.flatMap(purchase => purchase.numbers);
+            const winningNumbers = yield fetchWinningNumbers(record.round);
+            const ranks = numbers.map(selectedNumbers => checkWinning(selectedNumbers, winningNumbers).rank);
+            record.status = 'checked';
+            record.checkedAt = new Date().toISOString();
+            record.ranks = ranks;
+            changed = true;
+            if (issuesEnabled && record.issueNumber) {
+                try {
+                    yield updateIssueWithResults(record.issueNumber, record.round, ranks);
+                }
+                catch (error) {
+                    console.error(`[History] Failed to update issue #${record.issueNumber}:`, error instanceof Error ? error.message : error);
+                }
+            }
+            checkedResults.push({
+                trackingId: record.id,
+                round: record.round,
+                ranks,
+                issueNumber: record.issueNumber
+            });
+            console.log(`[History] Checked purchase record ${record.id}`);
+        }
+        if (changed) {
+            yield saveHistoryState(state, 'chore: update lotto winning results', sha);
+        }
+        return checkedResults;
+    });
 }
 
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
@@ -58274,16 +58337,16 @@ function notifyPurchase(purchases, depositBalance) {
     });
 }
 // Send winning notification to Telegram (only when there are winners)
-function notifyWinning(issueNumber, round, ranks) {
+function notifyWinning(result) {
     return __awaiter$4(this, void 0, void 0, function* () {
         if (!isEnabled())
             return;
-        const winningGames = ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(r => r.rank > 0);
+        const winningGames = result.ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(r => r.rank > 0);
         if (winningGames.length === 0)
             return;
         const rankEmojis = ['', '🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
         const results = winningGames.map(g => `  ${rankEmojis[g.rank]} ${g.game}번 게임: ${g.rank}등 당첨!`).join('\n');
-        const message = `🎉 *제${round}회 당첨!*\n\n` + `${results}\n\n` + `Issue #${issueNumber}`;
+        const message = `🎉 *제${result.round}회 당첨!*\n\n` + `${results}\n\n` + `${formatTrackingReference(result)}`;
         console.log('[Telegram] Sending winning notification');
         yield sendMessage(message);
     });
@@ -58316,7 +58379,7 @@ function notifyWinningCheckSummary(results) {
                 const text = rank > 0 ? `${rank}등 당첨` : '낙첨';
                 return `  ${index + 1}. ${text}`;
             });
-            return `*제${result.round}회* (Issue #${result.issueNumber})\n${lines.join('\n')}`;
+            return `*제${result.round}회* (${formatTrackingReference(result)})\n${lines.join('\n')}`;
         });
         const message = `${title}\n` + `총 ${totalGames}게임 확인\n\n` + sections.join('\n\n');
         console.log('[Telegram] Sending winning-check summary');
@@ -58422,15 +58485,15 @@ function notifyApnsPurchase(purchases, depositBalance) {
         });
     });
 }
-function notifyApnsWinning(issueNumber, round, ranks) {
+function notifyApnsWinning(result) {
     return __awaiter$4(this, void 0, void 0, function* () {
-        const winningGames = ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(result => result.rank > 0);
+        const winningGames = result.ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(item => item.rank > 0);
         if (winningGames.length === 0) {
             return;
         }
         yield notifyApns({
-            title: `제${round}회 로또 당첨`,
-            body: `${winningGames.map(result => `${result.game}번 ${result.rank}등`).join(', ')} (Issue #${issueNumber})`
+            title: `제${result.round}회 로또 당첨`,
+            body: `${winningGames.map(item => `${item.game}번 ${item.rank}등`).join(', ')} (${formatTrackingReference(result)})`
         });
     });
 }
@@ -58500,6 +58563,7 @@ function run() {
         const purchases = []; // Track all successful purchases
         let dryRun = false;
         let checkOnly = false;
+        let issuesEnabled = false;
         try {
             // Get inputs
             checkOnly = parseBooleanInput(coreExports.getInput('check-only') || process.env.CHECK_ONLY || 'false');
@@ -58520,10 +58584,8 @@ function run() {
                 throw new Error('[Main] Manual real purchase blocked. Set purchase-confirmation to BUY to run with dry-run=false.');
             }
             if (checkOnly) {
-                console.log('[Main] Initializing GitHub labels');
-                yield initLabels();
-                console.log('[Main] Checking winning for previous purchases');
-                const checkedResults = yield checkWinningIssues();
+                console.log('[Main] Checking winning for tracked purchases');
+                const checkedResults = yield checkPurchaseHistory();
                 yield notifyWinningCheckSummary(checkedResults);
                 yield notifyApnsWinningCheckSummary(checkedResults);
                 console.log('[Main] Check-only mode completed. No purchase was attempted.');
@@ -58538,16 +58600,23 @@ function run() {
             console.log('[Main] Logging in');
             yield session.login(id, pwd);
             if (!dryRun) {
-                // Initialize GitHub labels
-                console.log('[Main] Initializing GitHub labels');
-                yield initLabels();
-                // Check previous purchases for winning
-                console.log('[Main] Checking winning for previous purchases');
-                const checkedResults = yield checkWinningIssues();
+                issuesEnabled = yield isIssuesEnabled().catch(error => {
+                    console.warn('[Main] Failed to check GitHub Issues availability:', error instanceof Error ? error.message : error);
+                    return false;
+                });
+                if (issuesEnabled) {
+                    console.log('[Main] Initializing GitHub labels');
+                    yield initLabels();
+                }
+                else {
+                    console.log('[Main] GitHub Issues are disabled. Purchase history will use repository storage only.');
+                }
+                console.log('[Main] Checking winning for tracked purchases');
+                const checkedResults = yield checkPurchaseHistory();
                 // Send Telegram notifications for winning results
-                for (const result of checkedResults.filter(result => result.ranks.some(rank => rank > 0))) {
-                    yield notifyWinning(result.issueNumber, result.round, result.ranks);
-                    yield notifyApnsWinning(result.issueNumber, result.round, result.ranks);
+                for (const result of checkedResults.filter(entry => entry.ranks.some(rank => rank > 0))) {
+                    yield notifyWinning(result);
+                    yield notifyApnsWinning(result);
                 }
             }
             else {
@@ -58628,20 +58697,36 @@ function run() {
         finally {
             // Create one consolidated issue for all successful purchases
             if (purchases.length > 0) {
+                let purchaseRecordId = null;
                 try {
                     const depositBalance = yield getDepositBalance$1(session).catch(error => {
                         console.warn('[Main] Failed to fetch deposit balance:', error instanceof Error ? error.message : error);
                         return null;
                     });
-                    yield createConsolidatedIssue(purchases, depositBalance);
+                    const record = yield recordPurchaseHistory(purchases, depositBalance);
+                    purchaseRecordId = record.id;
                     const totalGames = purchases.reduce((sum, p) => sum + p.numbers.length, 0);
-                    console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+                    if (issuesEnabled) {
+                        try {
+                            const issueNumber = yield createConsolidatedIssue(purchases, depositBalance);
+                            if (purchaseRecordId) {
+                                yield attachIssueNumberToPurchaseHistory(purchaseRecordId, issueNumber);
+                            }
+                            console.log(`[Main] Created consolidated issue for ${purchases.length} purchases (${totalGames} total games)`);
+                        }
+                        catch (error) {
+                            console.error('[Main] Failed to create consolidated issue:', error);
+                        }
+                    }
+                    else {
+                        console.log('[Main] Skipping issue creation because GitHub Issues are disabled');
+                    }
                     // Send Telegram notification for purchases
                     yield notifyPurchase(purchases, depositBalance);
                     yield notifyApnsPurchase(purchases, depositBalance);
                 }
                 catch (error) {
-                    console.error(`[Main] Failed to create consolidated issue:`, error);
+                    console.error('[Main] Failed to record purchase history or send notifications:', error);
                 }
             }
             else if (checkOnly) {

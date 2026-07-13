@@ -2,12 +2,7 @@ import * as core from '@actions/core';
 import * as crypto from 'crypto';
 import * as http2 from 'http2';
 import { getNextLottoRound } from '../utils/rounds';
-
-interface PurchaseMetadata {
-  type: 'auto' | 'manual';
-  numbers: number[][];
-  timestamp: string;
-}
+import { formatTrackingReference, type PurchaseMetadata, type WinningCheckResult } from '../tracking/types';
 
 interface ApnsConfig {
   keyId: string;
@@ -134,21 +129,19 @@ export async function notifyApnsPurchase(purchases: PurchaseMetadata[], depositB
   });
 }
 
-export async function notifyApnsWinning(issueNumber: number, round: number, ranks: number[]): Promise<void> {
-  const winningGames = ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(result => result.rank > 0);
+export async function notifyApnsWinning(result: WinningCheckResult): Promise<void> {
+  const winningGames = result.ranks.map((rank, index) => ({ rank, game: index + 1 })).filter(item => item.rank > 0);
   if (winningGames.length === 0) {
     return;
   }
 
   await notifyApns({
-    title: `제${round}회 로또 당첨`,
-    body: `${winningGames.map(result => `${result.game}번 ${result.rank}등`).join(', ')} (Issue #${issueNumber})`
+    title: `제${result.round}회 로또 당첨`,
+    body: `${winningGames.map(item => `${item.game}번 ${item.rank}등`).join(', ')} (${formatTrackingReference(result)})`
   });
 }
 
-export async function notifyApnsWinningCheckSummary(
-  results: Array<{ issueNumber: number; round: number; ranks: number[] }>
-): Promise<void> {
+export async function notifyApnsWinningCheckSummary(results: WinningCheckResult[]): Promise<void> {
   if (results.length === 0) {
     await notifyApns({
       title: '로또 당첨 확인',
