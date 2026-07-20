@@ -58066,6 +58066,75 @@ function createPurchaseFailureIssue(details, message) {
         console.log('[Issues] Created purchase failure issue for insufficient balance');
     });
 }
+// Get all waiting issues (bug fix: get ALL open issues with waiting label)
+function getWaitingIssues() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        const octokit = getOctokit();
+        const repo = getRepo();
+        const issues = yield octokit.paginate(octokit.rest.issues.listForRepo, Object.assign(Object.assign({}, repo), { state: 'open', labels: LABELS.waiting, per_page: 100 }));
+        return issues;
+    });
+}
+// Check winning for all waiting issues
+function checkWinningIssues() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        console.log('[Issues] Checking winning for waiting issues');
+        const checkedResults = [];
+        const issues = yield getWaitingIssues();
+        console.log(`[Issues] Found ${issues.length} waiting issues`);
+        if (issues.length === 0) {
+            console.log('[Issues] No waiting issues to check');
+            return checkedResults;
+        }
+        const currentRound = getLastLottoRound();
+        for (const issue of issues) {
+            try {
+                const body = issue.body || '';
+                let round;
+                let allNumbers;
+                // Detect format and parse accordingly
+                if (isConsolidatedFormat(body)) {
+                    // New consolidated format
+                    const parsed = parseConsolidatedIssueBody(body);
+                    round = parsed.round;
+                    // Flatten all numbers from all purchases
+                    allNumbers = parsed.purchases.flatMap(p => p.numbers);
+                    console.log(`[Issues] Checking consolidated issue #${issue.number} with ${parsed.purchases.length} purchases (${allNumbers.length} games)`);
+                }
+                else {
+                    // Legacy format
+                    const parsed = parseIssueBody(body);
+                    round = parsed.round;
+                    allNumbers = parsed.numbers;
+                    console.log(`[Issues] Checking legacy issue #${issue.number} with ${allNumbers.length} games`);
+                }
+                // Skip if winning numbers not available yet
+                if (round > currentRound) {
+                    console.log(`[Issues] Issue #${issue.number}: Round ${round} not drawn yet (current: ${currentRound})`);
+                    continue;
+                }
+                console.log(`[Issues] Checking issue #${issue.number} for round ${round}`);
+                // Fetch winning numbers
+                const winningNumbers = yield fetchWinningNumbers(round);
+                // Check each game
+                const ranks = allNumbers.map(nums => {
+                    const result = checkWinning(nums, winningNumbers);
+                    return result.rank;
+                });
+                // Update issue with results
+                yield updateIssueWithResults(issue.number, round, ranks);
+                // Track checked results for notifications and summaries.
+                checkedResults.push({ issueNumber: issue.number, round, ranks });
+                console.log(`[Issues] Issue #${issue.number} updated with ranks:`, ranks);
+            }
+            catch (error) {
+                console.error(`[Issues] Error checking issue #${issue.number}:`, error);
+            }
+        }
+        console.log('[Issues] Finished checking all waiting issues');
+        return checkedResults;
+    });
+}
 // Update issue with winning results
 function updateIssueWithResults(issueNumber, round, ranks) {
     return __awaiter$4(this, void 0, void 0, function* () {
@@ -58109,6 +58178,67 @@ function rankToLabel(rank) {
         LABELS.winning_5th // rank 5
     ];
     return (_a = labelMap[rank]) !== null && _a !== void 0 ? _a : LABELS.losing;
+}
+// Helper: Check if issue body uses consolidated format
+function isConsolidatedFormat(body) {
+    return body.includes('## Purchase');
+}
+// Helper: Parse consolidated issue body (new format)
+function parseConsolidatedIssueBody(body) {
+    var _a;
+    const lines = body.split('\n');
+    const getValue = (line) => line.split(':').slice(1).join(':').trim();
+    // Parse header
+    const workflowRun = getValue(lines[0] || '');
+    const round = Number(getValue(lines[1] || ''));
+    // Parse purchases
+    const purchases = [];
+    let currentPurchase = null;
+    for (let i = 2; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line)
+            continue;
+        if (line.startsWith('## Purchase')) {
+            // Save previous purchase if exists
+            if (currentPurchase) {
+                purchases.push(currentPurchase);
+            }
+            // Start new purchase
+            currentPurchase = {};
+        }
+        else if (currentPurchase && line.includes(':')) {
+            const key = (_a = line.split(':')[0]) === null || _a === void 0 ? void 0 : _a.trim();
+            const value = getValue(line);
+            if (key === 'timestamp') {
+                currentPurchase.timestamp = value;
+            }
+            else if (key === 'type') {
+                currentPurchase.type = value;
+            }
+            else if (key === 'numbers') {
+                currentPurchase.numbers = JSON.parse(value || '[]');
+            }
+            else if (key === 'link') {
+                currentPurchase.link = value;
+            }
+        }
+    }
+    // Save last purchase
+    if (currentPurchase) {
+        purchases.push(currentPurchase);
+    }
+    return { workflowRun, round, purchases };
+}
+// Helper: Parse issue body (legacy format)
+function parseIssueBody(body) {
+    const lines = body.split('\n');
+    const getValue = (line) => { var _a, _b; return (_b = (_a = line.split(':')[1]) === null || _a === void 0 ? void 0 : _a.trim()) !== null && _b !== void 0 ? _b : ''; };
+    return {
+        date: getValue(lines[0] || ''),
+        round: Number(getValue(lines[1] || '')),
+        numbers: JSON.parse(getValue(lines[2] || '[]')),
+        link: getValue(lines[3] || '')
+    };
 }
 // Helper: Build consolidated issue body with multiple purchases
 function buildConsolidatedIssueBody(purchases, round, workflowRun, depositBalance) {
@@ -58557,6 +58687,36 @@ function loadWorkflow(workflowFile) {
         }
     });
 }
+function canUseIssuesForWinningCheck() {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        return isIssuesEnabled().catch(error => {
+            console.warn('[Main] Failed to check GitHub Issues availability:', error instanceof Error ? error.message : error);
+            return false;
+        });
+    });
+}
+function checkTrackedPurchases(includeIssues) {
+    return __awaiter$4(this, void 0, void 0, function* () {
+        console.log('[Main] Checking winning for tracked purchases');
+        const historyResults = yield checkPurchaseHistory();
+        if (!includeIssues) {
+            return historyResults;
+        }
+        const checkedIssueNumbers = new Set(historyResults
+            .map(result => result.issueNumber)
+            .filter((issueNumber) => typeof issueNumber === 'number'));
+        const issueResults = yield checkWinningIssues();
+        const issueOnlyResults = issueResults
+            .filter(result => !checkedIssueNumbers.has(result.issueNumber))
+            .map(result => ({
+            trackingId: `issue-${result.issueNumber}`,
+            issueNumber: result.issueNumber,
+            round: result.round,
+            ranks: result.ranks
+        }));
+        return [...historyResults, ...issueOnlyResults];
+    });
+}
 function run() {
     return __awaiter$4(this, void 0, void 0, function* () {
         const session = new BrowserSession();
@@ -58584,8 +58744,7 @@ function run() {
                 throw new Error('[Main] Manual real purchase blocked. Set purchase-confirmation to BUY to run with dry-run=false.');
             }
             if (checkOnly) {
-                console.log('[Main] Checking winning for tracked purchases');
-                const checkedResults = yield checkPurchaseHistory();
+                const checkedResults = yield checkTrackedPurchases(yield canUseIssuesForWinningCheck());
                 yield notifyWinningCheckSummary(checkedResults);
                 yield notifyApnsWinningCheckSummary(checkedResults);
                 console.log('[Main] Check-only mode completed. No purchase was attempted.');
@@ -58611,8 +58770,7 @@ function run() {
                 else {
                     console.log('[Main] GitHub Issues are disabled. Purchase history will use repository storage only.');
                 }
-                console.log('[Main] Checking winning for tracked purchases');
-                const checkedResults = yield checkPurchaseHistory();
+                const checkedResults = yield checkTrackedPurchases(issuesEnabled);
                 // Send Telegram notifications for winning results
                 for (const result of checkedResults.filter(entry => entry.ranks.some(rank => rank > 0))) {
                     yield notifyWinning(result);

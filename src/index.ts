@@ -6,7 +6,13 @@ import { getDepositBalance } from './core/balance';
 import { purchaseAuto, purchaseManual } from './core/purchase';
 import { isInsufficientBalanceError } from './core/errors';
 import { generateExcluding } from './utils/numbers';
-import { initLabels, createConsolidatedIssue, createPurchaseFailureIssue, isIssuesEnabled } from './github/issues';
+import {
+  initLabels,
+  createConsolidatedIssue,
+  createPurchaseFailureIssue,
+  isIssuesEnabled,
+  checkWinningIssues
+} from './github/issues';
 import {
   recordPurchaseHistory,
   attachIssueNumberToPurchaseHistory,
@@ -14,7 +20,7 @@ import {
 } from './github/purchase-history';
 import { notifyPurchase, notifyPurchaseFailure, notifyWinning, notifyWinningCheckSummary } from './telegram/notify';
 import { notifyApnsPurchase, notifyApnsWinning, notifyApnsWinningCheckSummary } from './push/apns';
-import { type PurchaseMetadata } from './tracking/types';
+import { type PurchaseMetadata, type WinningCheckResult } from './tracking/types';
 
 interface WorkflowApi {
   purchaseAuto: (amount: number) => Promise<number[][]>;
@@ -77,6 +83,39 @@ async function loadWorkflow(workflowFile: string): Promise<CustomWorkflow> {
   }
 }
 
+async function canUseIssuesForWinningCheck(): Promise<boolean> {
+  return isIssuesEnabled().catch(error => {
+    console.warn('[Main] Failed to check GitHub Issues availability:', error instanceof Error ? error.message : error);
+    return false;
+  });
+}
+
+async function checkTrackedPurchases(includeIssues: boolean): Promise<WinningCheckResult[]> {
+  console.log('[Main] Checking winning for tracked purchases');
+  const historyResults = await checkPurchaseHistory();
+
+  if (!includeIssues) {
+    return historyResults;
+  }
+
+  const checkedIssueNumbers = new Set(
+    historyResults
+      .map(result => result.issueNumber)
+      .filter((issueNumber): issueNumber is number => typeof issueNumber === 'number')
+  );
+  const issueResults = await checkWinningIssues();
+  const issueOnlyResults: WinningCheckResult[] = issueResults
+    .filter(result => !checkedIssueNumbers.has(result.issueNumber))
+    .map(result => ({
+      trackingId: `issue-${result.issueNumber}`,
+      issueNumber: result.issueNumber,
+      round: result.round,
+      ranks: result.ranks
+    }));
+
+  return [...historyResults, ...issueOnlyResults];
+}
+
 async function run() {
   const session = new BrowserSession();
   const purchases: PurchaseMetadata[] = []; // Track all successful purchases
@@ -106,8 +145,7 @@ async function run() {
     }
 
     if (checkOnly) {
-      console.log('[Main] Checking winning for tracked purchases');
-      const checkedResults = await checkPurchaseHistory();
+      const checkedResults = await checkTrackedPurchases(await canUseIssuesForWinningCheck());
 
       await notifyWinningCheckSummary(checkedResults);
       await notifyApnsWinningCheckSummary(checkedResults);
@@ -142,8 +180,7 @@ async function run() {
         console.log('[Main] GitHub Issues are disabled. Purchase history will use repository storage only.');
       }
 
-      console.log('[Main] Checking winning for tracked purchases');
-      const checkedResults = await checkPurchaseHistory();
+      const checkedResults = await checkTrackedPurchases(issuesEnabled);
 
       // Send Telegram notifications for winning results
       for (const result of checkedResults.filter(entry => entry.ranks.some(rank => rank > 0))) {
