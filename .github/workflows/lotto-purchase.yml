@@ -67,12 +67,6 @@ jobs:
           telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           telegram-chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
           telegram-notify-purchase: ${{ secrets.TELEGRAM_NOTIFY_PURCHASE || 'true' }}
-          apns-key-id: ${{ secrets.APNS_KEY_ID }}
-          apns-team-id: ${{ secrets.APNS_TEAM_ID }}
-          apns-bundle-id: ${{ secrets.APNS_BUNDLE_ID }}
-          apns-private-key: ${{ secrets.APNS_PRIVATE_KEY }}
-          apns-device-token: ${{ secrets.APNS_DEVICE_TOKEN }}
-          apns-use-sandbox: ${{ secrets.APNS_USE_SANDBOX || 'true' }}
           check-only: ${{ github.event_name == 'schedule' && github.event.schedule == '7 12 * * 6' && 'true' || 'false' }}
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
           game-count: ${{ github.event_name == 'workflow_dispatch' && inputs.game-count || '5' }}
