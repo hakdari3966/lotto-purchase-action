@@ -54,7 +54,8 @@
           "timestamp": "2026-08-03T12:42:14.840Z"
         }
       ],
-      "depositBalance": "0원"
+      "depositBalance": "0원",
+      "issueNumber": 2
     },
     {
       "id": "f021f29e-bea3-47c7-90d7-0b34eb5c3697",
