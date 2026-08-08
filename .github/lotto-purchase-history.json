@@ -5,7 +5,7 @@
       "id": "8cf51ad6-d0e0-43e4-a70a-f66958db2da7",
       "round": 1236,
       "createdAt": "2026-08-03T12:42:17.019Z",
-      "status": "waiting",
+      "status": "checked",
       "purchases": [
         {
           "type": "auto",
@@ -55,7 +55,15 @@
         }
       ],
       "depositBalance": "0원",
-      "issueNumber": 2
+      "issueNumber": 2,
+      "checkedAt": "2026-08-08T14:06:25.613Z",
+      "ranks": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
     },
     {
       "id": "f021f29e-bea3-47c7-90d7-0b34eb5c3697",
